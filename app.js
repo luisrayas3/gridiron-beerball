@@ -14,6 +14,8 @@ const Phase = {
   NORMAL_PLAY: 'normal_play',
   PLAY_RESULT: 'play_result',
   FOURTH_DOWN_DECISION: 'fourth_down_decision',
+  PUNT: 'punt',
+  PUNT_RETURN: 'punt_return',
   FIELD_GOAL_ATTEMPT: 'field_goal_attempt',
   TOUCHDOWN_CONVERSION: 'touchdown_conversion',
   EXTRA_POINT: 'extra_point',
@@ -37,6 +39,7 @@ function createInitialState(team1Name, team1Color, team2Name, team2Color) {
     phase: Phase.COIN_TOSS,
     pendingPlay: null,
     kickResult: null,
+    puntResult: null,
     openingKickoffReceiver: null,
     history: [],
     isOvertime: false,
@@ -204,8 +207,8 @@ function renderDownDistance() {
   const phase = gameState.phase;
 
   // Phases that don't show down/distance
-  if ([Phase.COIN_TOSS, Phase.KICKOFF, Phase.KICKOFF_RETURN, Phase.GAME_OVER,
-       Phase.OVERTIME_START, Phase.OVERTIME_FIELD_GOAL].includes(phase)) {
+  if ([Phase.COIN_TOSS, Phase.KICKOFF, Phase.KICKOFF_RETURN, Phase.PUNT, Phase.PUNT_RETURN,
+       Phase.GAME_OVER, Phase.OVERTIME_START, Phase.OVERTIME_FIELD_GOAL].includes(phase)) {
     elements.downText.textContent = '';
     elements.situationText.textContent = '';
     return;
@@ -360,6 +363,24 @@ const controlRenderers = {
       </div>
     </div>`,
 
+  [Phase.PUNT]: () => `
+    <div class="control-section">
+      <h3>${offenseTeam().name} punts from ${cupToLabel(gameState.ballPosition)} - which cup did the punter hit?</h3>
+      <div class="cup-select-grid">${renderCupSelectGrid('punt-hit')}</div>
+      <div class="button-row" style="margin-top: 1rem;">
+        <button class="btn btn-warning" data-action="punt-miss">Missed (base punt of 10)</button>
+      </div>
+    </div>`,
+
+  [Phase.PUNT_RETURN]: () => `
+    <div class="control-section">
+      <h3>${defenseTeam().name} returns punt from ${cupToLabel(gameState.puntResult)} - which cup did the returner hit?</h3>
+      <div class="cup-select-grid">${renderCupSelectGrid('punt-return-hit')}</div>
+      <div class="button-row" style="margin-top: 1rem;">
+        <button class="btn btn-warning" data-action="punt-return-miss">Missed (no change)</button>
+      </div>
+    </div>`,
+
   [Phase.FIELD_GOAL_ATTEMPT]: () => `
     <div class="control-section">
       <h3>${offenseTeam().name} attempts field goal from ${cupToLabel(gameState.ballPosition)}</h3>
@@ -452,6 +473,10 @@ const actionHandlers = {
   'kickoff-miss': () => handleKickoffLand(gameState.offenseTeam === 1 ? 7 : 14),
   'return-hit': e => handleReturn(parseInt(e.target.dataset.cup)),
   'return-miss': () => handleReturn(null),
+  'punt-hit': e => handlePuntKick(parseInt(e.target.dataset.cup)),
+  'punt-miss': () => handlePuntKick(null),
+  'punt-return-hit': e => handlePuntReturn(parseInt(e.target.dataset.cup)),
+  'punt-return-miss': () => handlePuntReturn(null),
   'select-players': e => handleSelectPlayers(parseInt(e.target.dataset.count)),
   'spike': handleSpike,
   'result': e => handlePlayResult(parseInt(e.target.dataset.yards)),
@@ -589,13 +614,41 @@ function handleFourthDown(choice) {
   if (choice === 'go') {
     gameState.phase = Phase.NORMAL_PLAY;
   } else if (choice === 'punt') {
-    // Ball moves 9 cups toward opponent's endzone
-    gameState.ballPosition = clampToField(gameState.ballPosition + 9 * direction());
-    if (flipPossession(true)) return; // Quarter transition handled
-    startNewPossession();
+    // Enter punt phase - punter shoots first
+    gameState.phase = Phase.PUNT;
   } else if (choice === 'fg') {
     gameState.phase = Phase.FIELD_GOAL_ATTEMPT;
   }
+}
+
+function handlePuntKick(cup) {
+  // Punter shot result - calculate punt landing position
+  // Base punt = 10 cups, modifier = (cup - 10) for Team 1, (11 - cup) for Team 2
+  let puntModifier = 0;
+  if (cup !== null) {
+    puntModifier = gameState.offenseTeam === 1 ? (cup - 10) : (11 - cup);
+  }
+  const puntDistance = 10 + puntModifier;
+  const landingPosition = clampToField(gameState.ballPosition + puntDistance * direction());
+  gameState.puntResult = landingPosition;
+  gameState.phase = Phase.PUNT_RETURN;
+}
+
+function handlePuntReturn(cup) {
+  let finalPosition = gameState.puntResult;
+  if (cup !== null) {
+    // Return modifier: receiving team wants to bring ball back toward their goal
+    // Receiving team is the current defense (opposite of offense)
+    // Team 2 receiving (offense=1): 11 - cup (hit cup 1 = +10 toward their endzone)
+    // Team 1 receiving (offense=2): cup - 10 (hit cup 20 = +10 toward their endzone)
+    const returnModifier = gameState.offenseTeam === 1 ? (11 - cup) : (cup - 10);
+    // Return modifier moves ball toward the receiver's endzone (opposite of punt direction)
+    finalPosition = clampToField(finalPosition - returnModifier * direction());
+  }
+  gameState.ballPosition = finalPosition;
+  gameState.puntResult = null;
+  if (flipPossession(true)) return; // Quarter transition handled
+  startNewPossession();
 }
 
 function handleFieldGoal(result) {
@@ -625,9 +678,9 @@ function scoreSafety() {
 
 function handleConversionChoice(choice) {
   if (choice === 'xp') {
-    // Extra point from the 4 yard line (4 cups from the endzone they scored in)
-    // Team 1 scored in right endzone, kicks from cup 17; Team 2 from cup 4
-    gameState.ballPosition = gameState.offenseTeam === 1 ? 17 : 4;
+    // Extra point from the 7 yard line (7 cups from the endzone they scored in)
+    // Team 1 scored in right endzone, kicks from cup 14; Team 2 from cup 7
+    gameState.ballPosition = gameState.offenseTeam === 1 ? 14 : 7;
     gameState.phase = Phase.EXTRA_POINT;
   } else {
     gameState.phase = Phase.TWO_POINT_CONVERSION;

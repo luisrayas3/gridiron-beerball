@@ -53,6 +53,38 @@ The best possible starting position (assuming no kicker error) is cup 16 (kick l
 
 After the return, place the marker ball in the resulting cup. The receiving team is now on offense at that line of scrimmage.
 
+## Punts
+
+Punts occur when the offense chooses to punt on 4th down. The mechanism is similar to kickoffs, with both teams getting a shot.
+
+### The punt
+
+The punter throws from behind their own goal line (all throws in this game are from your own endzone). The base punt distance is 10 cups toward the opponent's end zone. The punter's shot modifies this:
+
+- Hit a cup in the opponent's half of the field → bonus yards added to the punt.
+- Hit a cup in your own half → penalty yards subtracted from the punt.
+- Hit cup 10 (midfield) → no change, base punt of 10.
+- Miss all cups → no change, base punt of 10.
+
+The modifier equals the cup number hit minus 10 (from the punter's perspective, hitting farther = better).
+
+### The return
+
+After the punt lands, the receiving team gets one return throw from behind their own goal line. The return works exactly like a kickoff return:
+
+- Hit a cup in the opponent's half → ball moves back toward your goal (good return).
+- Hit a cup in your own half → ball moves toward opponent's goal (bad return).
+- Hit cup 10 or miss → no change.
+
+### Example
+
+Punting from your own 5-yard line:
+- Punter misses → base punt of 10 → ball lands at opponent's 6.
+- Punter hits cup 12 (+2 modifier) → punt of 12 → ball lands at opponent's 4.
+- Returner misses → no change to landing position.
+
+After the return, possession flips. The receiving team is now on offense at the resulting line of scrimmage.
+
 ## Offensive drives
 
 ### Downs
@@ -76,7 +108,7 @@ This creates a risk/reward decision for the offense. Sending 1 player (against 2
 On 4th down, the offense must choose one of three options before the play:
 
 - **Go for it:** Play a normal flip cup down. High risk, high reward.
-- **Punt:** No flip cup is played. The ball moves 9 zones toward the opponent's end zone. If this would push the ball past cup 20, place it at cup 20 (touchback). Possession flips.
+- **Punt:** No flip cup is played. The punting team shoots first, then the receiving team gets a return shot. See the punts section above. Possession flips.
 - **Field goal attempt:** See the field goals section below.
 
 ## Scoring
@@ -87,14 +119,14 @@ If the ball moves past cup 20 during an offensive drive, it's a touchdown. The d
 
 After a touchdown, the scoring team chooses one of the following:
 
-- **Extra point (1 point):** One player takes a single beer pong shot the endzone to the 4th cup from the endzone. Make it, 1 point.
+- **Extra point (1 point):** One player takes a single beer pong shot from the endzone to the 7th cup from the endzone. Make it, 1 point.
 - **Two-point conversion (2 points):** A 1v1 flip cup race. Win it, 2 points. Lose it, nothing.
 
 A kickoff follows.
 
 ### Field goal (3 points)
 
-The kicker throws the ball from behind their own goal line (behind cup 1) and must land it in the cup at the current line of scrimmage. The farther the ball has advanced down the field, the farther the throw and the harder the field goal.
+The kicker throws the ball from behind their own goal line and must land it in the cup at the current line of scrimmage. The farther the ball has advanced down the field, the farther the throw and the harder the field goal.
 
 - **Make it:** 3 points. A kickoff follows.
 - **Miss it:** Turnover on downs. The opposing team takes over at the current line of scrimmage.
@@ -135,6 +167,8 @@ If the score is tied after 4 quarters, each team gets 1 possession starting at c
 | Flip cup — defense wins | Lose yards by # of unflipped offensive cups |
 | Flip cup — tie | No gain, down consumed |
 | Interception | Defense wins and all defenders finish before any offensive flip |
-| Punt | Ball moves 9 zones toward opponent's end zone (max cup 20) |
+| Punt | Base 10 cups + punter modifier − return modifier |
 | Kickoff miss | Receiving team starts at cup 7 |
 | Kickoff return | Cup hit minus 10, modifies starting position |
+| Punt miss | Base punt of 10 cups toward opponent's end zone |
+| Punt return | Cup hit minus 10, modifies landing position |
