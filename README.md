@@ -1,8 +1,8 @@
-# Gridiron beerball
+# Gridiron Beerball
 
 ## Overview
 
-Gridiron beerball is a team drinking game that simulates American football using flip cup, beer pong throwing, and a field of 19 stationary cups. Two teams compete across four quarters to score touchdowns and field goals while defending their end zone.
+Gridiron Beerball is a team drinking game that simulates American football using flip cup, beer pong throwing, and a field of 19 stationary cups. Two teams compete across four quarters to score touchdowns and field goals while defending their end zone.
 
 ## Setup
 
@@ -14,9 +14,7 @@ Line up 19 cups in a row down the center of a long table. The center cup (positi
 - Cup 10: The 50 yard line (midfield)
 - Cups 11-19: Other team's territory (45, 40, 35, 30, 25, 20, 15, 10, 5 yard lines)
 
-A special ball (distinct from the throwing ball) sits inside whichever cup marks the current line of scrimmage.
-
-Each team's end zone is beyond one end of the table. For any given possession, the offense is trying to move the ball toward the defensive team's end zone and the defense is trying to push them back toward the offensive team's end zone.
+A marker ball sits inside whichever cup marks the current line of scrimmage. Each team's end zone is beyond one end of the table.
 
 ### Teams
 
@@ -30,104 +28,131 @@ Two teams of 5 or more players each. All players rotate into flip cup matchups t
 - Flip cups and drinks for each player
 - Something to track the first down marker (a coin, clip, or second marker)
 
-## Game structure
+## Gameplay
+
+### Quarters & possessions
 
 The game is played in 4 quarters. Each quarter consists of 2 possessions per team (4 total possessions per quarter, 16 total possessions in the game). Teams alternate possessions. A coin toss determines who receives the opening kickoff.
 
-## Kickoffs
+### Kickoffs
 
-Kickoffs occur at the start of each half and after every score. **Each kicker and returner gets 2 attempts; first make counts.**
+Kickoffs occur at the start of each half and after every score.
 
-### The kick
+The kicking team and receiving team each have opportunities to throw a pong ball for better field position. In certain cases, a kick recovery by the offense is possible. A kick return for a touchdown is also possible.
 
-The kicking team throws the ball from behind their own goal line. The kicker is trying to land the ball in a cup as close to the opponent's 5 yard line as possible (a deep kick).
+Instead of a normal kickoff, the kicking team may attempt an onside kick. If successful, the kicking team recovers the ball and becomes the offense. If it fails, the receiving team gets the ball at the kicking team's 35 yard line.
 
-- If the ball lands in any cup (within 2 attempts), the return begins from there.
-- If both attempts miss, the receiving team starts at the 25 yard line (touchback).
+See [Kicks & returns](#kicks--returns).
 
-### The return
+### Drives & downs
 
-After the kick, the receiving team gets up to 2 return throws from behind their own goal line. The return modifier is calculated as the cup hit minus 10 (with cup 10 being midfield/neutral).
+The offense has 4 downs to advance the ball at least 3 cups from their first down line of scrimmage. If they succeed, they earn a fresh set of 4 downs. If they fail, possession flips at the current line of scrimmage.
 
-- Hit a cup in the opponent's half → positive modifier → better field position.
-- Hit cup 10 (midfield) → 0 modifier → no change.
-- Hit a cup in your own half → negative modifier → worse field position.
-- Miss both attempts → no change.
-
-After the return, place the marker ball in the resulting cup. The receiving team is now on offense at that line of scrimmage.
-
-### Onside kick
-
-Instead of a normal kickoff, the kicking team may attempt an onside kick:
-
-- **1 throw only** (not 2 attempts).
-- Must hit a cup between the kicking team's 25 yard line and the 50 yard line.
-- **Success:** The kicking team recovers the ball at the cup they hit and becomes the offense.
-- **Failure (miss or hit wrong cup):** The receiving team gets the ball at the kicking team's 25 yard line.
-
-## Punts
-
-Punts occur when the offense chooses to punt. The mechanism is similar to kickoffs, with both teams getting up to 2 shots each.
-
-### The punt
-
-The punter throws from behind their own goal line (all throws in this game are from your own endzone). The base punt distance is 10 cups toward the opponent's end zone. The punter's shot modifies this:
-
-- Hit a cup in the opponent's half of the field → bonus yards added to the punt.
-- Hit a cup in your own half → penalty yards subtracted from the punt.
-- Hit cup 10 (midfield) → no change, base punt of 10.
-- Miss both attempts → no change, base punt of 10.
-
-The modifier equals the cup number hit minus 10 (from the punter's perspective, hitting farther = better).
-
-### The return
-
-After the punt lands, the receiving team gets up to 2 return throws from behind their own goal line. The return works exactly like a kickoff return:
-
-- Hit a cup in the opponent's half → ball moves back toward your goal (good return).
-- Hit a cup in your own half → ball moves toward opponent's goal (bad return).
-- Hit cup 10 or miss both → no change.
-
-After the return, possession flips. The receiving team is now on offense at the resulting line of scrimmage.
-
-## Offensive drives
-
-### Downs
-
-The offense has 4 downs to advance the ball at least 3 cups from their first down marker. If they reach or pass the marker, they earn a fresh set of 4 downs. If they fail, possession flips and the other team takes over at the current line of scrimmage.
-
-### Play options
-
-On **any down**, the offense can choose from the following plays:
+On any down, the offense can choose from:
 
 | Play | Description |
 |---|---|
-| Punt | Kick the ball away (see punts section) |
+| Punt | Kick the ball away; possession flips after the return |
 | Field goal | Attempt to score 3 points |
-| Spike | Consume a down with no play (no flip cup, no throw) |
-| QB sneak | 1v1 flip cup (safe play) |
-| Run 2v3 | 2 offense vs 3 defense flip cup |
-| Run 3v4 | 3 offense vs 4 defense flip cup |
-| Run 4v5 | 4 offense vs 5 defense flip cup |
-| Throw | Up to 3 pong shots |
+| QB sneak | 1v1 flip cup — low risk, small gain |
+| Run (2v3, 3v4, 4v5) | Flip cup race — higher risk and reward |
+| Pass | Up to 3 pong shots — variable outcomes including turnovers |
 
-### Running — flip cup
+**Running plays** are flip cup races where the offense sends 1-4 players and the defense sends one more. Yards gained or lost depend on how decisively one side wins. If the defense dominates completely, it's a fumble and they take possession. See [Running](#running) for detailed mechanics.
 
-The offense selects how many players to send (1-4). If sending 1, it's a QB sneak. Otherwise, the defense sends one more player than the offense (n+1). Both sides line up for a relay-style flip cup race.
+**Passing plays** give the offense up to 3 throws at field cups. Closer cups are safer with smaller gains; deeper cups offer bigger gains but risk incompletions or interceptions. See [Passing](#passing) for detailed mechanics.
 
-On "hike," both sides race. The first team to flip all their cups wins the down.
+**Punts** work like kickoffs: the punting team and receiving team each throw pong balls to improve their resulting field position. See [Kicks & returns](#kicks--returns) for detailed mechanics.
 
-#### QB sneak (1v1)
+### Scoring
 
-A safe, low-risk play:
+| Event | Points |
+|---|---|
+| Touchdown | 6 |
+| Extra point | 1 |
+| Two-point conversion | 2 |
+| Field goal | 3 |
+| Safety | 2 |
 
-- **Offense wins:** Gain 1 yard.
-- **Defense wins or tie:** No gain (0 yards). Tie goes to offense.
-- No interception possible on QB sneak.
+**Touchdown:** If the ball moves past the opponent's 5 yard line during a drive, it's a touchdown. The defense drinks a penalty (agree on intensity before the game). After scoring, the offense chooses to attempt an extra point or two-point conversion, then kicks off.
 
-#### Regular runs (2v3, 3v4, 4v5)
+**Field goal:** The offense can attempt a field goal on any down. Success awards 3 points and a kickoff follows. Failure is a turnover at the current spot. See [Field goals](#field-goals) for detailed mechanics.
 
-Yardage is determined by the number of unflipped cups remaining on the losing side:
+**Safety:** If the defense pushes the offense back past their own 5 yard line, it's a safety. The defense scores 2 points and receives a kickoff.
+
+**Conversions:** See [Touchdown conversions](#touchdown-conversions) for extra point and two-point mechanics.
+
+### Overtime
+
+If the score is tied after 4 quarters, each team gets 1 possession starting at the 50 yard line. If still tied, teams alternate field goal attempts (first of 3, same as regular field goals) from progressively farther back until one makes and the other misses.
+
+## Play mechanics
+
+All throws are made from behind your own goal line, except field goals and extra points which are thrown from behind the opponent's goal line.
+
+### Kicks & returns
+
+Kickoffs, punts, and their respective returns share the same core mechanics.
+
+**Attempts:** Each kicker and returner gets up to 2 pong throw attempts; the first make counts.
+
+**Throw modifiers:** All kicks and returns use the same modifier table. The cup you hit determines an offset (in cups) applied to the ball's position. Throwing deeper (toward the opponent's endzone) gives a better modifier:
+
+| Cup hit | Modifier |
+|---|---|
+| Opponent's 5 | +10 (best) |
+| Opponent's 10 | +9 |
+| Opponent's 15 | +8 |
+| Opponent's 20 | +7 |
+| Opponent's 25 | +6 |
+| Opponent's 30 | +5 |
+| Opponent's 35 | +4 |
+| Opponent's 40 | +3 |
+| Opponent's 45 | +2 |
+| 50 yard line | +1 |
+| Own 45 | 0 |
+| Own 40 | -1 |
+| Own 35 | -2 |
+| Own 30 | -3 |
+| Own 25 | -4 |
+| Own 20 | -5 |
+| Own 15 | -6 |
+| Own 10 | -7 |
+| Own 5 | -8 (worst) |
+| Miss both | 0 |
+
+**Kickoffs:** The kicker's modifier determines where the ball lands (offset from the receiving 25). A miss means touchback at the receiving team's 25. After the kick lands, the returner throws and their modifier adjusts the final field position.
+
+**Punts:** Base punt distance is 10 cups toward the opponent's end zone. The punter's modifier adjusts this distance, and the returner's modifier then adjusts the final position. Miss = base punt of 10 cups with no modifier.
+
+**Return outcomes:**
+
+- **Return touchdown:** If the returner's modifier pushes the ball past the opponent's endzone, it's a touchdown.
+- **Kick recovery:** If the returner hits a cup but the ball ends up in their own endzone, the kicking team recovers at the returner's 5 yard line. This includes any cup hit when the kick landed in the endzone that doesn't get the ball out. For example, a +19 kick (4 cups into the endzone) only has 6 safe cups - the remaining 13 are all recoveries.
+- **Touchback:** If the returner misses both throws, the ball is placed at the returner's 5 yard line (touchback). This is the only way to avoid a recovery when the kick lands deep in the endzone.
+
+**Onside kick:** Instead of a normal kickoff, the kicking team may attempt an onside kick:
+
+- 1 attempt only (not 2)
+- Must hit the kicking team's 35, 40, or 45 yard line
+- **Success:** Kicking team gets the ball at the cup they hit
+- **Failure:** Receiving team gets the ball at the kicking team's 25 yard line
+
+### Running
+
+Running plays are relay-style flip cup races. The offense chooses how many players to send (1-4), and the defense sends one more (except for QB sneaks). The relay proceeds in the direction the offense is attacking.
+
+**The hike:** The first offensive player "hikes" the ball — as soon as they lift their cup off the table, the play is live.
+
+**Offsides:** Any cup lifted before it should be (before the hike, or before the previous teammate has finished) is offsides — 1-cup penalty against that team and the down is repeated. Offsides cannot cause a safety or touchdown; if it occurs at the 5 yard line, the ball stays at the 5.
+
+**QB sneak (1v1):** A low-risk play.
+
+- Offense wins: Gain 1 yard
+- Defense wins or ties: No gain (0 yards)
+- No fumble possible
+
+**Regular runs (2v3, 3v4, 4v5):** Yardage is determined by unflipped cups on the losing side:
 
 | Unflipped cups | Yards |
 |---|---|
@@ -135,152 +160,117 @@ Yardage is determined by the number of unflipped cups remaining on the losing si
 | 2 | 2 |
 | 3 | 5 |
 | 4 | 9 |
-| 5 | Touchdown! |
+| 5 | Touchdown |
 
-- **Offense wins:** The ball advances forward by the scheduled yards.
-- **Defense wins:** The ball moves backward by the scheduled yards.
-- **Tie (final cups flipped simultaneously):** No gain, no loss. The down is still used.
+- **Offense wins:** Ball advances by the scheduled yards
+- **Defense wins:** Ball moves backward by the scheduled yards
+- **Tie:** No gain, no loss; down consumed
 
-#### Running — fumble
+**Fumble:** If the defense wins and every defensive player finishes before any offensive player successfully flips, it's a fumble. The defense takes possession at the current line of scrimmage.
 
-If the defense wins a flip cup round and **every single defensive player finishes before any offensive player successfully flips**, it's a fumble. The defense takes possession at the current line of scrimmage.
+### Passing
 
-**Exception:** QB sneaks (1v1) cannot result in fumbles.
+The offense gets up to 3 throws from their end zone. The first meaningful result (gain, loss, or turnover) ends the play. If all 3 throws miss or are incomplete, the down is consumed with no yardage change.
 
-### Throwing — passing play
+**Sack fumble zone (own 5 to own 25):** Hitting cups 1-5 (closest to thrower) results in a sack fumble.
 
-The offense can throw up to 3 pong shots from their endzone. The first meaningful result (gain, loss, or turnover) ends the play.
+| Cup | Result |
+|---|---|
+| Own 5, 10, 15, 20, 25 | **Sack fumble** — defense recovers at spot minus 3 yards. Can result in defensive touchdown. |
 
-#### Middle zone (safe throws)
+**Middle zone (own 30 to opponent's 35):** Safe throws, no call required.
 
-The 7 cups from your own 35 yard line to the opponent's 35 yard line are the middle zone. No "call" is required.
+| Cup | Result |
+|---|---|
+| Own 30 | -3 yards |
+| Own 35 | -2 yards |
+| Own 40 | -1 yard |
+| Own 45 | No gain |
+| 50 yard line | +1 yard |
+| Opponent's 45 | +2 yards |
+| Opponent's 40 | +3 yards |
+| Opponent's 35 | +4 yards |
 
-| Position | Yard line | Result |
-|---|---|---|
-| 3 behind 50 | Own 35 | Lose 2 yards |
-| 2 behind 50 | Own 40 | Lose 1 yard |
-| 1 behind 50 | Own 45 | No gain |
-| 50 yard line | 50 | Gain 1 yard |
-| 1 beyond 50 | Opp 45 | Gain 2 yards |
-| 2 beyond 50 | Opp 40 | Gain 3 yards |
-| 3 beyond 50 | Opp 35 | Gain 4 yards |
+**Danger zone (opponent's 30, 25, 20):**
 
-Hitting your own territory beyond the 35 (own 30 yard line and back) = **immediate incomplete** (lose remaining throws).
-
-#### Danger zone
-
-The 3 cups at the opponent's 30, 25, and 20 yard lines:
-
-| Yard line | Result |
+| Cup | Result |
 |---|---|
 | Opponent's 30 | Incomplete (ends throws) |
-| Opponent's 25 | **Interception!** Defense takes over at current spot. |
+| Opponent's 25 | **Unforced interception** — defense takes over at current spot |
 | Opponent's 20 | Incomplete (ends throws) |
 
-#### Deep zone (called throws)
+**Defensive interception shot:** If the offense hits a cup on the 2nd or 3rd throw, the defense gets one chance to intercept by hitting the exact same cup. If successful, it's an interception. No interception shot is allowed in response to cups made on the 1st throw.
 
-The final 3 cups (opponent's 15, 10, 5 yard lines) require a "call." Before throwing, announce which cup you're targeting.
+**Deep zone (opponent's 15, 10, 5):** Called throws. Before throwing, announce which cup you're targeting.
 
-| Called cup | Gain |
+| Called cup | Result |
 |---|---|
-| 15 yard line | 6 yards |
-| 10 yard line | 9 yards |
-| 5 yard line | Touchdown! |
+| Opponent's 15 | +6 yards |
+| Opponent's 10 | +9 yards |
+| Opponent's 5 | Touchdown |
 
-**Important rules for called throws:**
+Rules for called throws:
 
-- You only get the gain for what you *called*, even if you hit deeper.
-- Hitting the middle zone when you called a deep cup = incomplete (ends throws).
-- If you don't make your call (or farther), it's incomplete (ends throws).
+- You only get credit for what you called: hitting deeper counts as a catch but you only get the points called
+- Each attempt may make different calls
+- Missing in front of your call = incomplete (ends throws)
+- Hitting middle zone when you called deep = incomplete (ends throws)
 
-#### All throws incomplete
+### Field goals
 
-If all 3 throws miss or result in incomplete, the down is consumed with no yardage change.
+Field goals are the only play thrown from behind the opponent's goal line. The kicker gets 3 attempts and must hit the current line of scrimmage or any cup beyond (closer to their own end zone).
 
-## Scoring
+- **Make:** 3 points, kickoff follows
+- **Miss all 3:** Turnover at the current line of scrimmage
 
-### Touchdown (6 points)
+**Blocking rule:** If the kicker makes it on the first attempt, no block is allowed. If made on the second or third attempt, the defense gets one chance to hit the same cup. If they hit it, the kick is blocked — no points, turnover at the current spot.
 
-If the ball moves past the opponent's 5 yard line during an offensive drive, it's a touchdown. The defense drinks a penalty round (each defender finishes a cup or takes a shot — agree on intensity before the game starts).
+### Touchdown conversions
 
-After a touchdown, the scoring team chooses one of the following:
+After a touchdown, the scoring team chooses:
 
-- **Extra point (1 point):** One player throws from the opponent's endzone and gets up to **3 pong shots**. Hit **any cup** and it's good, subject to blocking rule (if not made on first attempt, defense gets one shot at the same cup to block).
-- **Two-point conversion (2 points):** A 1v1 flip cup race. Win it, 2 points. Lose it, nothing.
+**Extra point (1 point):** A field goal attempt from the 5 yard line. Standard field goal rules apply, including the blocking rule.
 
-A kickoff follows.
-
-### Field goal (3 points)
-
-The kicker throws the ball from behind the **opponent's** goal line (the only play thrown from the opponent's side). The kicker must hit a valid cup: either the current line of scrimmage or any cup closer to the kicker's home endzone. **The kicker gets 3 attempts.**
-
-- **Make any:** 3 points, subject to blocking rule (see below). A kickoff follows.
-- **Miss all 3:** Turnover. The opposing team takes over at the current line of scrimmage regardless of what down it was.
-
-#### Blocking rule (field goals and extra points)
-
-If the kicker makes it on the **first attempt**, the kick is good — no block attempt allowed. If the kicker makes it on the **second or third attempt**, the defense gets **one chance** to hit the exact same cup to block the kick. If blocked, no points are scored and it counts as a turnover.
-
-### Safety (2 points)
-
-If the defense pushes the offense back past their own 5 yard line (into their own end zone), it's a safety. The defensive team scores 2 points and the offense must kick off to them.
-
-## Turnovers
-
-### Fumble (flip cup)
-
-If the defense wins a flip cup round and every single defensive player finishes before any offensive player successfully flips, it's a fumble. The defense takes possession at the current line of scrimmage. Directions reverse — what was defense is now offense, moving toward the opposite end zone.
-
-**Exception:** QB sneaks (1v1) cannot result in fumbles.
-
-### Interception (throw)
-
-If a throwing play hits the interception cup (opponent's 25 yard line), it's an interception. The defense takes possession at the current line of scrimmage.
-
-### Turnover on downs
-
-If the offense fails to gain 3 cups in 4 downs and doesn't punt or attempt a field goal, possession simply flips at the current spot.
-
-## Overtime
-
-If the score is tied after 4 quarters, each team gets 1 possession starting at cup 10 (midfield). If still tied after both possessions, teams alternate field goal attempts (2 shots each) from progressively farther back until one makes and the other misses.
+**Two-point conversion (2 points):** A 1v1 flip cup (QB sneak rules). Win = 2 points. Tie or lose = 0 points.
 
 ## Quick reference
 
-| Event | Points |
+| Scoring | Points |
 |---|---|
 | Touchdown | 6 |
-| Extra point (any cup, 3 attempts, blocking rule) | 1 |
+| Extra point (FG from the 5) | 1 |
 | Two-point conversion (1v1 flip cup) | 2 |
-| Field goal (valid cup, 3 attempts, blocking rule) | 3 |
+| Field goal (3 attempts, blocking rule) | 3 |
 | Safety | 2 |
 
 | Run play | Result |
 |---|---|
 | QB sneak — offense wins | +1 yard |
-| QB sneak — defense wins or tie | 0 yards |
-| Flip cup — offense wins | Advance by schedule (1→1, 2→2, 3→5, 4→9, 5→TD) |
+| QB sneak — defense wins or ties | 0 yards |
+| Flip cup — offense wins | Advance by schedule (1/2/5/9/TD) |
 | Flip cup — defense wins | Lose by schedule |
 | Flip cup — tie | No gain, down consumed |
-| Flip cup fumble | All defenders finish before any offensive flip |
+| Fumble | All defenders flip before any offensive flip |
 
-| Throw play | Result |
+| Pass play | Result |
 |---|---|
-| Middle zone (own 35 to opp 35) | -2 to +4 yards based on position |
-| Behind own 35 | Immediate incomplete (ends throws) |
-| Danger zone — 30 or 20 | Incomplete (ends throws) |
-| Danger zone — 25 | Interception |
-| Deep zone — called 15 | +6 yards |
-| Deep zone — called 10 | +9 yards |
-| Deep zone — called 5 | Touchdown |
-| All 3 throws incomplete | Down consumed, no change |
+| Sack fumble zone (own 5-25) | Fumble, -3 yards, can be defensive TD |
+| Middle zone (own 30 to opp 35) | -3 to +4 yards |
+| Danger zone — 30 or 20 | Incomplete |
+| Danger zone — 25 | Unforced interception |
+| Deep zone — call 15/10/5 | +6 / +9 / TD |
+| All incomplete | Down consumed |
+| Interception shot | 2nd/3rd throw: defense can match cup |
 
-| Kick/return | Result |
+| Kicks & returns | Result |
 |---|---|
-| All kicks | 2 attempts (first make counts) |
-| Kickoff miss (both) | Touchback at 25 yard line |
-| Onside kick | 1 attempt, must hit own 25 to 50 |
-| Onside success | Kicking team gets ball at that cup |
-| Onside fail | Receiving team gets ball at kicking team's 25 |
-| Punt miss (both) | Base punt of 10 cups |
-| Return miss (both) | No change to landing position |
+| Standard kick/return | 2 attempts each |
+| Kickoff miss | Touchback at 25 |
+| Punt miss | Base 10 cups |
+| Return miss | No modifier |
+| Return TD | Modifier pushes ball past opponent's endzone |
+| Kick recovery | Any hit that leaves ball in own endzone |
+| Touchback | Miss both throws when kick in endzone → own 5 |
+| Onside kick | 1 attempt, hit own 35/40/45 |
+| Onside success | Kicking team gets ball |
+| Onside fail | Receiving team at kicker's 25 |
