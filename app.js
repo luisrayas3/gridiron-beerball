@@ -1303,8 +1303,8 @@ const controlRenderers = {
   [Phase.FIELD_GOAL_ATTEMPT]: () => controlSection(
     `${offenseTeam().name} - field goal (first of 3)`,
     gameState.offenseTeam,
-    Button.success('Field goal', 'field-goal', { result: 'make' }) +
-    Button.danger('No good', 'field-goal', { result: 'miss' })
+    Button.danger('No good', 'field-goal', { result: 'miss' }) +
+    Button.success('Field goal', 'field-goal', { result: 'make' })
   ),
 
   [Phase.TOUCHDOWN_CONVERSION]: () => controlSection(
@@ -1317,8 +1317,8 @@ const controlRenderers = {
   [Phase.EXTRA_POINT]: () => controlSection(
     `${offenseTeam().name} - extra point (first of 3)`,
     gameState.offenseTeam,
-    Button.success('Extra point', 'extra-point', { result: 'make' }) +
-    Button.neutral('No good', 'extra-point', { result: 'miss' })
+    Button.neutral('No good', 'extra-point', { result: 'miss' }) +
+    Button.success('Extra point', 'extra-point', { result: 'make' })
   ),
 
   [Phase.TWO_POINT_CONVERSION]: () => {
@@ -1357,8 +1357,8 @@ const controlRenderers = {
   [Phase.OVERTIME_FIELD_GOAL]: () => controlSection(
     `${offenseTeam().name} - OT field goal (first of 3)`,
     gameState.offenseTeam,
-    Button.success('Field goal', 'ot-fg', { result: 'make' }) +
-    Button.neutral('Missed', 'ot-fg', { result: 'miss' })
+    Button.neutral('Missed', 'ot-fg', { result: 'miss' }) +
+    Button.success('Field goal', 'ot-fg', { result: 'make' })
   )
 };
 
