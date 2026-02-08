@@ -327,7 +327,7 @@ body {
   position: absolute;
   top: 50%;
   transform: translateY(-50%);
-  font-size: 1rem;
+  font-size: 1.5rem;
   font-weight: bold;
   color: rgba(255, 255, 255, 0.8);
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
@@ -337,11 +337,13 @@ body {
 .direction-arrow.left {
   left: 0;
   transform: translateX(-50%) translateY(-50%);
+  font-size: 1.75rem;
 }
 
 .direction-arrow.right {
   right: 0;
   transform: translateX(50%) translateY(-50%);
+  font-size: 1.75rem;
 }
 
 /* Middle row: cup effects */
@@ -567,6 +569,33 @@ body {
 
 .offense-team2 {
   background: var(--team2-color);
+}
+
+/* Player circles for run plays - uses cup-effect styling with row offsets */
+.effect-row.player-circles-mode {
+  position: relative;
+}
+
+.effect-row.player-circles-mode .cup-effect {
+  width: 24px;
+  height: 24px;
+  font-size: 0.6rem;
+}
+
+.effect-row.player-circles-mode .cup-effect.player-top {
+  top: 0;
+  transform: translateX(-50%);
+}
+
+.effect-row.player-circles-mode .cup-effect.player-bottom {
+  top: auto;
+  bottom: 0;
+  transform: translateX(-50%);
+}
+
+.effect-row.player-circles-mode .cup-effect.empty {
+  background: transparent;
+  border: 2px dashed rgba(255, 255, 255, 0.3);
 }
 
 /* Responsive */

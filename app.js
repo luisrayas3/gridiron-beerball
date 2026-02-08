@@ -710,9 +710,9 @@ function renderBallRow(ballPos, isReturnPhase, offenseGoesRight) {
     if (ballPos === -ENDZONE) arrowBasePos = 0;
     else if (ballPos === ENDZONE) arrowBasePos = 100;
     else arrowBasePos = (ballPos + 10) * 5;
-    arrow.style.left = `${arrowBasePos + (arrowRight ? 3 : -3)}%`;
+    arrow.style.left = `${arrowBasePos + (arrowRight ? 2 : -2)}%`;
     arrow.style.transform = 'translateX(-50%) translateY(-50%)';
-    arrow.textContent = arrowRight ? '>>>' : '<<<';
+    arrow.textContent = arrowRight ? '›' : '‹';
     ballRow.appendChild(arrow);
   }
 
@@ -837,7 +837,18 @@ function renderEffectRow(offenseGoesRight) {
     const throwerGoesRight = oppositeDirection.includes(gameState.phase) ? !offenseGoesRight : offenseGoesRight;
     const throwArrow = document.createElement('span');
     throwArrow.className = `direction-arrow ${throwerGoesRight ? 'left' : 'right'}`;
-    throwArrow.textContent = throwerGoesRight ? '>>>' : '<<<';
+    // Use play-specific emoji for throw indicator
+    let throwEmoji;
+    if ([Phase.KICKOFF_KICK, Phase.ONSIDE_KICK, Phase.PUNT].includes(gameState.phase)) {
+      throwEmoji = '👟';  // Cleat for kicks/punts
+    } else if ([Phase.FIELD_GOAL_ATTEMPT, Phase.EXTRA_POINT].includes(gameState.phase)) {
+      throwEmoji = '🥅';  // Goal for field goals
+    } else if ([Phase.KICKOFF_RETURN, Phase.PUNT_RETURN].includes(gameState.phase)) {
+      throwEmoji = '🏃';  // Runner for returns
+    } else {
+      throwEmoji = '💪';  // Arm for passes
+    }
+    throwArrow.textContent = throwEmoji;
     effectRow.appendChild(throwArrow);
   }
 
@@ -870,6 +881,109 @@ function renderNumberRow() {
   }
 
   return numberRow;
+}
+
+// Render player circles during run plays
+// Shows two rows (top=team+1/away, bottom=team-1/home) with gain/loss values
+// Replaces the effect row but uses same cup-effect styling
+function renderPlayerCircles() {
+  if (gameState.phase !== Phase.PLAY_RESULT) return null;
+  const { offensePlayers, isQBSneak } = gameState.phaseData || {};
+  if (isQBSneak || !offensePlayers) return null;
+
+  const defensePlayers = offensePlayers + 1;
+  const maxPlayers = defensePlayers;
+  const team = gameState.offenseTeam;
+
+  // Top row is ALWAYS team +1 (away/right), bottom is ALWAYS team -1 (home/left)
+  // Team +1 attacks right, team -1 attacks left
+  const team1IsOffense = team > 0;
+
+  // Build position data for each slot
+  // Positions ordered so extra defender is at the end in offense's attack direction
+  const topRowData = [];  // team +1
+  const bottomRowData = [];  // team -1
+
+  for (let i = 0; i < maxPlayers; i++) {
+    // For team +1 offense (attacks right): positions grow left-to-right, extra defender on right
+    // For team -1 offense (attacks left): positions grow right-to-left, extra defender on left
+    const slotIndex = team > 0 ? i : (maxPlayers - 1 - i);
+
+    // Offense has fewer players - check if this slot has an offense player
+    const hasOffensePlayer = slotIndex < offensePlayers;
+
+    // Calculate offense value (loss if offense has unflipped cups)
+    let offenseValue = '';
+    if (hasOffensePlayer) {
+      const unflipped = offensePlayers - slotIndex;
+      if (unflipped === offensePlayers) {
+        offenseValue = 'FUM';
+      } else {
+        const yards = FLIP_CUP_YARDAGE[unflipped];
+        offenseValue = `-${yards}`;
+      }
+    }
+
+    // Calculate defense value (gain if defense has unflipped cups)
+    const defUnflipped = defensePlayers - slotIndex;
+    const defYards = FLIP_CUP_YARDAGE[defUnflipped];
+    const defenseValue = defYards === 'TD' ? 'TD' : `+${defYards}`;
+
+    // Assign based on which team is offense
+    // Top row = team +1, bottom row = team -1
+    if (team1IsOffense) {
+      topRowData[i] = offenseValue;  // team +1 is offense
+      bottomRowData[i] = defenseValue;  // team -1 is defense
+    } else {
+      topRowData[i] = defenseValue;  // team +1 is defense
+      bottomRowData[i] = offenseValue;  // team -1 is offense
+    }
+  }
+
+  // Create effect row with two sub-rows of circles
+  const effectRow = document.createElement('div');
+  effectRow.className = 'field-row effect-row player-circles-mode';
+
+  // Calculate center position and spacing
+  const centerPercent = 50;
+  const spacing = 5;  // percentage between circles
+  const startOffset = -((maxPlayers - 1) * spacing) / 2;
+
+  const createCircle = (value, posIndex) => {
+    const circle = document.createElement('div');
+    circle.className = 'cup-effect';
+    circle.style.left = `${centerPercent + startOffset + posIndex * spacing}%`;
+
+    if (!value) {
+      circle.classList.add('empty');
+    } else if (value === 'FUM') {
+      circle.classList.add('effect-turnover');
+    } else if (value.startsWith('+')) {
+      circle.classList.add('effect-gain');
+    } else if (value.startsWith('-')) {
+      circle.classList.add('effect-loss');
+    } else if (value === 'TD') {
+      circle.classList.add('effect-gain');
+    }
+    circle.textContent = value || '';
+    return circle;
+  };
+
+  // Add top row circles (offset up)
+  topRowData.forEach((value, i) => {
+    const circle = createCircle(value, i);
+    circle.classList.add('player-top');
+    effectRow.appendChild(circle);
+  });
+
+  // Add bottom row circles (offset down)
+  bottomRowData.forEach((value, i) => {
+    const circle = createCircle(value, i);
+    circle.classList.add('player-bottom');
+    effectRow.appendChild(circle);
+  });
+
+  return effectRow;
 }
 
 // Render first down marker if applicable
@@ -914,7 +1028,15 @@ function renderField() {
   const offenseGoesRight = gameState.offenseTeam > 0;  // Team +1 goes right
 
   elements.field.appendChild(renderBallRow(ballPos, isReturnPhase, offenseGoesRight));
-  elements.field.appendChild(renderEffectRow(offenseGoesRight));
+
+  // Show player circles during run plays, otherwise show effect row
+  const playerCircles = renderPlayerCircles();
+  if (playerCircles) {
+    elements.field.appendChild(playerCircles);
+  } else {
+    elements.field.appendChild(renderEffectRow(offenseGoesRight));
+  }
+
   elements.field.appendChild(renderNumberRow());
 
   const firstDownMarker = renderFirstDownMarker();
