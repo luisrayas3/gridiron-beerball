@@ -3,7 +3,6 @@
 const STORAGE_KEY = 'gridiron-beerball-game';
 const STORAGE_VERSION = 3;  // Increment when state structure changes
 const CUPS_TO_FIRST_DOWN = 3;
-const TOTAL_CUPS = 19;
 const POSSESSIONS_PER_QUARTER = 4;
 const TOTAL_QUARTERS = 4;
 const BASE_KICK_DISTANCE = 10;  // Base punt/kick distance per rules
@@ -44,17 +43,6 @@ const FieldPosition = {
     if (pos < this.FIELD_MIN) return this.ENDZONE_LEFT;
     if (pos > this.FIELD_MAX) return this.ENDZONE_RIGHT;
     return pos;
-  },
-
-  toDisplayPercent(pos) {
-    if (pos <= this.ENDZONE_LEFT) return -3;
-    if (pos >= this.ENDZONE_RIGHT) return 103;
-    return (pos + 10) * 5;
-  },
-
-  yardLine(yards, team) {
-    const cupFromMidfield = (50 - yards) / 5;
-    return cupFromMidfield * team;
   }
 };
 
@@ -101,10 +89,6 @@ const THROW_ZONES = {
   DEEP_END: 9         // opponent's 5 yard line, TD
 };
 
-// Gains for deep zone: relative position 7→6, 8→9, 9→TD
-const DEEP_GAINS = { 7: 6, 8: 9, 9: 'TD' };
-
-
 // Default game state
 // Teams are 1 (goes right/positive) or -1 (goes left/negative)
 // Cup positions are -9 to +9, where 0 = 50 yard line
@@ -131,72 +115,6 @@ function createInitialState(team1Name, team1Color, team2Name, team2Color) {
 let gameState = null;
 
 // ============ Helpers ============
-
-// Convert cup position to relative position from offense perspective
-// Positive = toward offense's scoring endzone
-function toRelativePosition(cup) {
-  return cup * gameState.offenseTeam;
-}
-
-// Get throw result for a cup hit
-// Returns { type: 'gain'|'incomplete'|'incomplete_end'|'interception'|'touchdown'|'sack_fumble', yards: number|null }
-function getThrowResult(cup, calledCup) {
-  const team = gameState.offenseTeam;
-  const relPos = cup * team;
-  const calledRelPos = calledCup !== null ? calledCup * team : null;
-
-  // Sack fumble zone (cups 1-5, own 5-25): -3 yards, turnover, can be defensive TD
-  if (relPos >= THROW_ZONES.SACK_FUMBLE_START && relPos <= THROW_ZONES.SACK_FUMBLE_END) {
-    return { type: 'sack_fumble', yards: -3 };
-  }
-
-  // Middle zone (-4 to +3): gains or losses, no call needed
-  if (relPos >= THROW_ZONES.MIDDLE_START && relPos <= THROW_ZONES.MIDDLE_END) {
-    if (calledRelPos !== null) {
-      return { type: 'incomplete_end', yards: null };
-    }
-    // Gain/loss: relPos directly (-3→-2 yards, 0→+1 yard, +3→+4 yards)
-    const yards = relPos + 1;
-    return { type: 'gain', yards };
-  }
-
-  // Danger zone
-  if (relPos === THROW_ZONES.INCOMPLETE_30 || relPos === THROW_ZONES.INCOMPLETE_20) {
-    return { type: 'incomplete_end', yards: null };
-  }
-  if (relPos === THROW_ZONES.INTERCEPTION) {
-    return { type: 'interception', yards: null };
-  }
-
-  // Deep zone (+7 to +9): must have called, and hit at least as far
-  if (relPos >= THROW_ZONES.DEEP_START && relPos <= THROW_ZONES.DEEP_END) {
-    if (calledRelPos === null) {
-      return { type: 'incomplete_end', yards: null };
-    }
-    if (relPos < calledRelPos) {
-      return { type: 'incomplete_end', yards: null };
-    }
-    const gain = DEEP_GAINS[calledRelPos];
-    if (gain === 'TD') {
-      return { type: 'touchdown', yards: null };
-    }
-    return { type: 'gain', yards: gain };
-  }
-
-  return { type: 'incomplete', yards: null };
-}
-
-// Get the callable deep zone cups (for UI display)
-function getDeepZoneCups() {
-  const team = gameState.offenseTeam;
-  const cups = [];
-  for (let relPos = THROW_ZONES.DEEP_START; relPos <= THROW_ZONES.DEEP_END; relPos++) {
-    const actualCup = relPos * team;  // Convert back to absolute cup
-    const gain = DEEP_GAINS[relPos];
-    cups.push({ cup: actualCup, relPos, gain });
-  }
-  return cups;
-}
 
 // Get team object by team ID (1 or -1)
 function getTeam(teamId) {
@@ -247,15 +165,6 @@ function advanceBall(yards) {
 function cupDisplayLabel(cup) {
   if (cup === 0) return 50;
   return (10 - Math.abs(cup)) * 5;
-}
-
-// Get CSS class for cup based on which team's territory
-// Negative cups: Team -1's territory (left side)
-// Positive cups: Team +1's territory (right side)
-function cupColorClass(cup) {
-  if (cup < 0) return 'team1-half';
-  if (cup > 0) return 'team2-half';
-  return 'midfield';
 }
 
 // Convert cup position to display string with team abbreviation
@@ -492,8 +401,7 @@ function initElements() {
     'setup-screen', 'game-screen', 'team1-name', 'team1-color', 'team2-name', 'team2-color',
     'start-game', 'resume-game', 'score-team1-name', 'score-team2-name', 'score-team1', 'score-team2',
     'quarter-display', 'possession-display', 'down-text', 'situation-text', 'field',
-    'endzone-left', 'endzone-right', 'controls', 'new-game', 'undo',
-    'result-indicators-top', 'result-indicators-bottom'
+    'endzone-left', 'endzone-right', 'controls', 'new-game', 'undo'
   ];
   ids.forEach(id => {
     const camelId = id.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
@@ -659,7 +567,6 @@ function renderDownDistance() {
 // Phase groupings for field rendering
 const KICKING_PHASES = [Phase.KICKOFF, Phase.KICKOFF_KICK, Phase.ONSIDE_KICK];
 const RETURN_PHASES = [Phase.KICKOFF_RETURN, Phase.PUNT_RETURN];
-const CONVERSION_PHASES = [Phase.TOUCHDOWN_CONVERSION, Phase.TWO_POINT_CONVERSION];
 const THROWING_PHASES = [Phase.THROW_PLAY, Phase.KICKOFF_KICK, Phase.ONSIDE_KICK, Phase.KICKOFF_RETURN,
                          Phase.PUNT, Phase.PUNT_RETURN, Phase.FIELD_GOAL_ATTEMPT, Phase.EXTRA_POINT];
 const PLAY_PHASES = [Phase.NORMAL_PLAY, Phase.PLAY_RESULT, Phase.THROW_PLAY, Phase.FIELD_GOAL_ATTEMPT, Phase.PUNT];
@@ -1105,23 +1012,6 @@ function renderField() {
   if (firstDownMarker) elements.field.appendChild(firstDownMarker);
 
   renderEndzones(ballPos, isReturnPhase);
-}
-
-function renderResultIndicators() {
-  elements.resultIndicatorsTop.innerHTML = '';
-  elements.resultIndicatorsBottom.innerHTML = '';
-
-  const result = gameState.lastPlayResult;
-  if (!result) return;
-
-  // Team +1 (home/right) shows above, Team -1 (away/left) shows below
-  const container = result.team > 0 ? elements.resultIndicatorsTop : elements.resultIndicatorsBottom;
-
-  const indicator = document.createElement('div');
-  indicator.className = `result-indicator result-${result.type}`;
-  indicator.style.left = `${(result.position + 10) * 5}%`;
-  indicator.textContent = result.text;
-  container.appendChild(indicator);
 }
 
 // Helper to get CSS class number (1 or 2) from team ID (+1 or -1)
