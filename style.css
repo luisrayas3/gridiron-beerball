@@ -249,6 +249,7 @@ body {
   font-size: 1rem;
   color: var(--text-muted);
   margin-top: 0.25rem;
+  min-height: 1.5rem;
 }
 
 /* Field */
@@ -291,7 +292,7 @@ body {
 #field {
   flex: 1;
   display: grid;
-  grid-template-rows: 1fr 1fr 1fr;
+  grid-template-rows: 1fr 1fr 2fr;
   position: relative;
   background: repeating-linear-gradient(
     90deg,
@@ -346,7 +347,7 @@ body {
   font-size: 1.75rem;
 }
 
-/* Middle row: cup effects */
+/* Bottom row: cup effects */
 .field-row.effect-row {
   display: flex;
   align-items: center;
@@ -365,6 +366,7 @@ body {
   font-size: 0.75rem;
   font-weight: 600;
   color: white;
+  z-index: 10;
 }
 
 .cup-effect.effect-active {
@@ -392,7 +394,7 @@ body {
   box-shadow: 0 0 8px #22c55e;
 }
 
-/* Bottom row: yard numbers */
+/* Middle row: yard numbers */
 .field-row.number-row {
   display: flex;
   align-items: center;
@@ -454,6 +456,17 @@ body {
   background: #22c55e;
 }
 
+/* Line of scrimmage */
+.line-of-scrimmage {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4px;
+  background: rgba(70, 130, 200, 0.8);
+  z-index: 2;
+  transform: translateX(-50%);
+}
+
 /* First down marker */
 .first-down-marker {
   position: absolute;
@@ -461,7 +474,6 @@ body {
   bottom: 0;
   width: 4px;
   background: #fbbf24;
-  box-shadow: 0 0 8px #fbbf24;
   z-index: 5;
   transform: translateX(-50%);
 }
@@ -483,7 +495,7 @@ body {
   background: rgba(255, 255, 255, 0.05);
   border-radius: 12px;
   padding: 1rem 1.5rem 1.5rem;
-  min-height: 120px;
+  height: 160px;
 }
 
 .control-section {
@@ -576,21 +588,17 @@ body {
   position: relative;
 }
 
-.effect-row.player-circles-mode .cup-effect {
-  width: 24px;
-  height: 24px;
-  font-size: 0.6rem;
-}
-
 .effect-row.player-circles-mode .cup-effect.player-top {
-  top: 0;
+  top: 4px;
   transform: translateX(-50%);
+  border: 2px solid var(--team2-color);
 }
 
 .effect-row.player-circles-mode .cup-effect.player-bottom {
   top: auto;
-  bottom: 0;
+  bottom: 4px;
   transform: translateX(-50%);
+  border: 2px solid var(--team1-color);
 }
 
 .effect-row.player-circles-mode .cup-effect.empty {

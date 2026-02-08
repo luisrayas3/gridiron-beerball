@@ -219,6 +219,36 @@ function clampToField(position) {
   return Math.max(CUP_MIN, Math.min(CUP_MAX, position));
 }
 
+// Check if current ball position results in TD or safety, and handle it
+// Returns: 'td', 'safety', or null (play continues normally)
+// Clamps position and triggers scoring if applicable
+function checkScoring() {
+  const team = gameState.offenseTeam;
+
+  // Touchdown: past opponent's endzone
+  if (gameState.ballPosition * team > CUP_MAX) {
+    gameState.ballPosition = clampToField(gameState.ballPosition);
+    scoreTouchdown();
+    return 'td';
+  }
+
+  // Safety: pushed back past own endzone
+  if (gameState.ballPosition * team < CUP_MIN) {
+    gameState.ballPosition = clampToField(gameState.ballPosition);
+    scoreSafety();
+    return 'safety';
+  }
+
+  return null;
+}
+
+// Move ball by yards in offense's direction, then check for TD/safety
+// Returns: 'td', 'safety', or null (normal play continues)
+function advanceBall(yards) {
+  gameState.ballPosition += yards * gameState.offenseTeam;
+  return checkScoring();
+}
+
 // Get display label for a cup (yard lines)
 // Cup 0 = 50, cup ±5 = 25, cup ±9 = 5
 function cupDisplayLabel(cup) {
@@ -291,6 +321,28 @@ function controlSection(headerText, headerTeam, ...buttonRows) {
     .join('');
 
   return `<div class="control-section"><span class="${headerClass}"${style}>${headerText}</span>${rowsHtml}</div>`;
+}
+
+// Render controls for sneak-style 1v1 flip cup (used by both Sneak and Two-Point)
+// This is a single source of truth - any flip cup 1v1 UI must use this function
+function renderSneakControls(title, resultAction, offsidesAction, options = {}) {
+  const {
+    lossLabel = 'Tied or lost (0)',
+    winLabel = 'Won (+1)',
+  } = options;
+  const teamClass = teamCssClass(gameState.offenseTeam);
+  return `
+    <div class="control-section">
+      <span class="offense-indicator offense-team${teamClass}">${offenseTeam().name} - ${title}</span>
+      <div class="button-row">
+        <button class="btn btn-neutral" data-action="${resultAction}" data-cups="0">${lossLabel}</button>
+        <button class="btn btn-success" data-action="${resultAction}" data-cups="1">${winLabel}</button>
+      </div>
+      <div class="button-row" style="margin-top: 0.5rem;">
+        <button class="btn btn-warning" data-action="${offsidesAction}" data-dir="-1">Offense 🚩 (-1)</button>
+        <button class="btn btn-warning" data-action="${offsidesAction}" data-dir="1">Defense 🚩 (+1)</button>
+      </div>
+    </div>`;
 }
 
 // ============ Grid Renderers ============
@@ -637,9 +689,6 @@ function calculateBallPosition() {
       return FieldPosition.MIDFIELD;
 
     case Phase.KICKOFF:
-      // Ball in kicking team's endzone (receiver's defending endzone)
-      return team * FieldPosition.ENDZONE_RIGHT;
-
     case Phase.KICKOFF_KICK:
     case Phase.ONSIDE_KICK:
       // Kicking from 25 yard line
@@ -732,7 +781,7 @@ function getCupEffect(cupIndex, phase) {
     effect.text = isValidFG ? 'FG' : '0';
   } else if (phase === Phase.EXTRA_POINT) {
     effect.className = 'effect-gain';
-    effect.text = 'XP';
+    effect.text = '1PT';
   } else if (phase === Phase.ONSIDE_KICK) {
     // Onside kick: only 35, 40, 45 yard lines are valid
     const validPositions = [team * 3, team * 2, team * 1];
@@ -826,7 +875,7 @@ function getCupEffect(cupIndex, phase) {
   return effect;
 }
 
-// Render the middle row: cup effects and throwing indicator
+// Render the bottom row: cup effects and throwing indicator
 function renderEffectRow(offenseGoesRight) {
   const effectRow = document.createElement('div');
   effectRow.className = 'field-row effect-row';
@@ -854,6 +903,8 @@ function renderEffectRow(offenseGoesRight) {
 
   for (let cup = CUP_MIN; cup <= CUP_MAX; cup++) {
     const cupEffect = getCupEffect(cup, gameState.phase);
+    // Only render cups that have an effect
+    if (!cupEffect.className && !cupEffect.text) continue;
     const effect = document.createElement('div');
     effect.className = 'cup-effect';
     effect.style.left = `${(cup + 10) * 5}%`;  // -9→5%, 0→50%, +9→95%
@@ -865,7 +916,7 @@ function renderEffectRow(offenseGoesRight) {
   return effectRow;
 }
 
-// Render the bottom row: yard numbers
+// Render the middle row: yard numbers
 function renderNumberRow() {
   const numberRow = document.createElement('div');
   numberRow.className = 'field-row number-row';
@@ -886,57 +937,78 @@ function renderNumberRow() {
 // Render player circles during run plays
 // Shows two rows (top=team+1/away, bottom=team-1/home) with gain/loss values
 // Replaces the effect row but uses same cup-effect styling
+// Phases that use flip cup mechanics and should show player circles.
+// When adding new flip cup phases, ensure they:
+// 1. Set phaseData = { offensePlayers, isQBSneak } when entering the phase
+// 2. Have a control renderer with result buttons (and offsides if applicable)
+// 3. Are included in this array for player circle rendering
+const FLIP_CUP_PHASES = [Phase.PLAY_RESULT, Phase.TWO_POINT_CONVERSION];
+
 function renderPlayerCircles() {
-  if (gameState.phase !== Phase.PLAY_RESULT) return null;
+  if (!FLIP_CUP_PHASES.includes(gameState.phase)) return null;
   const { offensePlayers, isQBSneak } = gameState.phaseData || {};
-  if (isQBSneak || !offensePlayers) return null;
+  if (!offensePlayers) return null;
 
-  const defensePlayers = offensePlayers + 1;
-  const maxPlayers = defensePlayers;
   const team = gameState.offenseTeam;
-
   // Top row is ALWAYS team +1 (away/right), bottom is ALWAYS team -1 (home/left)
-  // Team +1 attacks right, team -1 attacks left
   const team1IsOffense = team > 0;
 
   // Build position data for each slot
-  // Positions ordered so extra defender is at the end in offense's attack direction
   const topRowData = [];  // team +1
   const bottomRowData = [];  // team -1
 
-  for (let i = 0; i < maxPlayers; i++) {
-    // For team +1 offense (attacks right): positions grow left-to-right, extra defender on right
-    // For team -1 offense (attacks left): positions grow right-to-left, extra defender on left
-    const slotIndex = team > 0 ? i : (maxPlayers - 1 - i);
-
-    // Offense has fewer players - check if this slot has an offense player
-    const hasOffensePlayer = slotIndex < offensePlayers;
-
-    // Calculate offense value (loss if offense has unflipped cups)
-    let offenseValue = '';
-    if (hasOffensePlayer) {
-      const unflipped = offensePlayers - slotIndex;
-      if (unflipped === offensePlayers) {
-        offenseValue = 'FUM';
-      } else {
-        const yards = FLIP_CUP_YARDAGE[unflipped];
-        offenseValue = `-${yards}`;
-      }
-    }
-
-    // Calculate defense value (gain if defense has unflipped cups)
-    const defUnflipped = defensePlayers - slotIndex;
-    const defYards = FLIP_CUP_YARDAGE[defUnflipped];
-    const defenseValue = defYards === 'TD' ? 'TD' : `+${defYards}`;
-
-    // Assign based on which team is offense
-    // Top row = team +1, bottom row = team -1
+  // Offense lines up on their right (looking from own endzone toward opponent's)
+  // Team +1 attacks right, so their right = bottom of screen
+  // Team -1 attacks left, so their right = top of screen
+  if (isQBSneak) {
+    // Sneak/Two-point: 1v1, defense wins = points/yards, offense loses = 0
+    const isTwoPoint = gameState.phase === Phase.TWO_POINT_CONVERSION;
+    const winLabel = isTwoPoint ? '2PT' : '+1';
     if (team1IsOffense) {
-      topRowData[i] = offenseValue;  // team +1 is offense
-      bottomRowData[i] = defenseValue;  // team -1 is defense
+      topRowData[0] = winLabel;  // defense (team -1)
+      bottomRowData[0] = '0';   // offense (team +1) - on their right
     } else {
-      topRowData[i] = defenseValue;  // team +1 is defense
-      bottomRowData[i] = offenseValue;  // team -1 is offense
+      topRowData[0] = '0';   // offense (team -1) - on their right
+      bottomRowData[0] = winLabel;  // defense (team +1)
+    }
+  } else {
+    const defensePlayers = offensePlayers + 1;
+    const maxPlayers = defensePlayers;
+
+    for (let i = 0; i < maxPlayers; i++) {
+      // For team +1 offense (attacks right): positions grow left-to-right, extra defender on right
+      // For team -1 offense (attacks left): positions grow right-to-left, extra defender on left
+      const slotIndex = team > 0 ? i : (maxPlayers - 1 - i);
+
+      // Offense has fewer players - check if this slot has an offense player
+      const hasOffensePlayer = slotIndex < offensePlayers;
+
+      // Calculate offense value (loss if offense has unflipped cups)
+      let offenseValue = '';
+      if (hasOffensePlayer) {
+        const unflipped = offensePlayers - slotIndex;
+        if (unflipped === offensePlayers) {
+          offenseValue = 'FUM';
+        } else {
+          const yards = FLIP_CUP_YARDAGE[unflipped];
+          offenseValue = `-${yards}`;
+        }
+      }
+
+      // Calculate defense value (gain if defense has unflipped cups)
+      const defUnflipped = defensePlayers - slotIndex;
+      const defYards = FLIP_CUP_YARDAGE[defUnflipped];
+      const defenseValue = defYards === 'TD' ? 'TD' : `+${defYards}`;
+
+      // Assign based on which team is offense
+      // Offense on their right: team +1 offense → bottom, team -1 offense → top
+      if (team1IsOffense) {
+        topRowData[i] = defenseValue;  // team -1 is defense
+        bottomRowData[i] = offenseValue;  // team +1 is offense (their right = bottom)
+      } else {
+        topRowData[i] = offenseValue;  // team -1 is offense (their right = top)
+        bottomRowData[i] = defenseValue;  // team +1 is defense
+      }
     }
   }
 
@@ -947,7 +1019,8 @@ function renderPlayerCircles() {
   // Calculate center position and spacing
   const centerPercent = 50;
   const spacing = 5;  // percentage between circles
-  const startOffset = -((maxPlayers - 1) * spacing) / 2;
+  const numPlayers = topRowData.length;
+  const startOffset = -((numPlayers - 1) * spacing) / 2;
 
   const createCircle = (value, posIndex) => {
     const circle = document.createElement('div');
@@ -962,8 +1035,10 @@ function renderPlayerCircles() {
       circle.classList.add('effect-gain');
     } else if (value.startsWith('-')) {
       circle.classList.add('effect-loss');
-    } else if (value === 'TD') {
+    } else if (value === 'TD' || value.endsWith('PT')) {
       circle.classList.add('effect-gain');
+    } else if (value === '0') {
+      circle.classList.add('effect-neutral');
     }
     circle.textContent = value || '';
     return circle;
@@ -984,6 +1059,16 @@ function renderPlayerCircles() {
   });
 
   return effectRow;
+}
+
+// Render line of scrimmage marker
+function renderLineOfScrimmage(ballPos) {
+  if (ballPos < CUP_MIN || ballPos > CUP_MAX) return null;
+
+  const markerEl = document.createElement('div');
+  markerEl.className = 'line-of-scrimmage';
+  markerEl.style.left = `${(ballPos + 10) * 5}%`;
+  return markerEl;
 }
 
 // Render first down marker if applicable
@@ -1028,6 +1113,7 @@ function renderField() {
   const offenseGoesRight = gameState.offenseTeam > 0;  // Team +1 goes right
 
   elements.field.appendChild(renderBallRow(ballPos, isReturnPhase, offenseGoesRight));
+  elements.field.appendChild(renderNumberRow());
 
   // Show player circles during run plays, otherwise show effect row
   const playerCircles = renderPlayerCircles();
@@ -1037,7 +1123,8 @@ function renderField() {
     elements.field.appendChild(renderEffectRow(offenseGoesRight));
   }
 
-  elements.field.appendChild(renderNumberRow());
+  const lineOfScrimmage = renderLineOfScrimmage(ballPos);
+  if (lineOfScrimmage) elements.field.appendChild(lineOfScrimmage);
 
   const firstDownMarker = renderFirstDownMarker();
   if (firstDownMarker) elements.field.appendChild(firstDownMarker);
@@ -1101,7 +1188,8 @@ const controlRenderers = {
   [Phase.ONSIDE_KICK]: () => controlSection(
     `${defenseTeam().name} - onside kick (one attempt)`,
     -gameState.offenseTeam,
-    renderOnsideRecoveryGrid() + Button.warning('Missed (+2)', 'onside-miss')
+    renderOnsideRecoveryGrid(),
+    Button.warning('Missed (+2)', 'onside-miss')
   ),
 
   [Phase.KICKOFF_RETURN]: () => {
@@ -1134,7 +1222,7 @@ const controlRenderers = {
         <button class="btn ${primaryClass}" data-action="start-throw">Pass</button>
       </div>
       <div class="button-row" style="margin-top: 0.5rem;">
-        <button class="btn ${primaryClass}" data-action="qb-sneak">QB sneak (1v1)</button>
+        <button class="btn ${primaryClass}" data-action="qb-sneak">Sneak 1v1</button>
         <button class="btn ${primaryClass}" data-action="select-players" data-count="2">Run 2v3</button>
         <button class="btn ${primaryClass}" data-action="select-players" data-count="3">Run 3v4</button>
         <button class="btn ${primaryClass}" data-action="select-players" data-count="4">Run 4v5</button>
@@ -1147,18 +1235,7 @@ const controlRenderers = {
     const teamClass = teamCssClass(gameState.offenseTeam);
 
     if (isQBSneak) {
-      return `
-        <div class="control-section">
-          <span class="offense-indicator offense-team${teamClass}">${offenseTeam().name} - QB sneak (1v1)</span>
-          <div class="button-row">
-            <button class="btn btn-neutral" data-action="result" data-cups="0">Tied or lost (0)</button>
-            <button class="btn btn-success" data-action="result" data-cups="1">Won (+1)</button>
-          </div>
-          <div class="button-row" style="margin-top: 0.5rem;">
-            <button class="btn btn-warning" data-action="offsides" data-dir="-1">Offsides -1</button>
-            <button class="btn btn-warning" data-action="offsides" data-dir="1">Offsides +1</button>
-          </div>
-        </div>`;
+      return renderSneakControls('Sneak 1v1', 'result', 'offsides');
     }
 
     const defensePlayers = offensePlayers + 1;
@@ -1182,8 +1259,8 @@ const controlRenderers = {
         <span class="offense-indicator offense-team${teamClass}">${offenseTeam().name} - run (${offensePlayers}v${defensePlayers})</span>
         <div class="button-row">${buttons.join('')}</div>
         <div class="button-row" style="margin-top: 0.5rem;">
-          <button class="btn btn-warning" data-action="offsides" data-dir="-1">Offsides -1</button>
-          <button class="btn btn-warning" data-action="offsides" data-dir="1">Offsides +1</button>
+          <button class="btn btn-warning" data-action="offsides" data-dir="-1">Offense 🚩 (-1)</button>
+          <button class="btn btn-warning" data-action="offsides" data-dir="1">Defense 🚩 (+1)</button>
         </div>
       </div>`;
   },
@@ -1205,8 +1282,8 @@ const controlRenderers = {
           <button class="btn btn-success" data-action="throw-result" data-result="4">+4</button>
         </div>
         <div class="button-row" style="margin-top: 0.5rem;">
-          <button class="btn btn-neutral" data-action="throw-result" data-result="incomplete">Incomplete</button>
-          <button class="btn btn-danger" data-action="throw-result" data-result="int">Interception</button>
+          <button class="btn btn-neutral" data-action="throw-result" data-result="incomplete">Incomplete (0)</button>
+          <button class="btn btn-danger" data-action="throw-result" data-result="int">Interception (0)</button>
           <button class="btn btn-success" data-action="throw-result" data-result="5">+5</button>
           <span style="color: var(--text-muted); margin: 0 0.5rem;">Called:</span>
           <button class="btn btn-success" data-action="throw-result" data-result="6">+6</button>
@@ -1245,20 +1322,12 @@ const controlRenderers = {
       </div>`;
   },
 
-  [Phase.FIELD_GOAL_ATTEMPT]: () => {
-    const teamClass = teamCssClass(gameState.offenseTeam);
-    return `
-      <div class="control-section">
-        <span class="offense-indicator offense-team${teamClass}">${offenseTeam().name} - field goal (first of 3)</span>
-        <div class="button-row">
-          <button class="btn btn-success" data-action="field-goal" data-result="make">Field goal</button>
-          <button class="btn btn-danger" data-action="field-goal" data-result="miss">Missed</button>
-        </div>
-        <div class="button-row" style="margin-top: 0.5rem;">
-          <button class="btn btn-danger" data-action="field-goal" data-result="miss">Blocked</button>
-        </div>
-      </div>`;
-  },
+  [Phase.FIELD_GOAL_ATTEMPT]: () => controlSection(
+    `${offenseTeam().name} - field goal (first of 3)`,
+    gameState.offenseTeam,
+    Button.success('Field goal', 'field-goal', { result: 'make' }) +
+    Button.danger('No good', 'field-goal', { result: 'miss' })
+  ),
 
   [Phase.TOUCHDOWN_CONVERSION]: () => controlSection(
     `${offenseTeam().name} - touchdown!`,
@@ -1271,16 +1340,20 @@ const controlRenderers = {
     `${offenseTeam().name} - extra point (first of 3)`,
     gameState.offenseTeam,
     Button.success('Extra point', 'extra-point', { result: 'make' }) +
-    Button.neutral('Missed', 'extra-point', { result: 'miss' }),
-    Button.neutral('Blocked', 'extra-point', { result: 'miss' })
+    Button.neutral('No good', 'extra-point', { result: 'miss' })
   ),
 
-  [Phase.TWO_POINT_CONVERSION]: () => controlSection(
-    `${offenseTeam().name} - two-point`,
-    gameState.offenseTeam,
-    Button.success('Won', 'two-point', { result: 'make' }) +
-    Button.neutral('Tied or lost', 'two-point', { result: 'miss' })
-  ),
+  [Phase.TWO_POINT_CONVERSION]: () => {
+    const teamClass = teamCssClass(gameState.offenseTeam);
+    return `
+      <div class="control-section">
+        <span class="offense-indicator offense-team${teamClass}">${offenseTeam().name} - Two-point 1v1</span>
+        <div class="button-row">
+          <button class="btn btn-neutral" data-action="two-point" data-cups="0">No good</button>
+          <button class="btn btn-success" data-action="two-point" data-cups="1">2 points</button>
+        </div>
+      </div>`;
+  },
 
   [Phase.GAME_OVER]: () => {
     const winner = gameState.team1.score > gameState.team2.score ? gameState.team1 :
@@ -1345,7 +1418,7 @@ const actionHandlers = {
   'field-goal': e => handleFieldGoal(e.target.dataset.result),
   'conversion-choice': e => handleConversionChoice(e.target.dataset.choice),
   'extra-point': e => handleExtraPoint(e.target.dataset.result),
-  'two-point': e => handleTwoPoint(e.target.dataset.result),
+  'two-point': e => handleTwoPoint(parseInt(e.target.dataset.cups)),
   'start-overtime': handleStartOvertime,
   'ot-first': e => handleOTFirst(parseInt(e.target.dataset.team)),
   'ot-fg': e => handleOTFieldGoal(e.target.dataset.result),
@@ -1572,11 +1645,16 @@ function handlePlayResult(cups) {
   const position = gameState.ballPosition;
   gameState.phaseData = null;
 
-  // QB Sneak: win or tie = +1, loss = 0
+  // QB Sneak: win = +1, tie/loss = 0
   if (isQBSneak) {
     if (cups > 0) {
-      gameState.ballPosition += team;
-      gameState.ballPosition = clampToField(gameState.ballPosition);
+      const result = advanceBall(1);
+      if (result === 'td') {
+        gameState.lastPlayResult = { team, position, type: 'td', text: 'TD' };
+        return;
+      }
+      // Safety not possible on sneak win, but advanceBall handles it
+
       gameState.lastPlayResult = { team, position, type: 'gain', text: '1' };
 
       const madeFirstDown = gameState.ballPosition * team >= gameState.firstDownMarker * team;
@@ -1624,28 +1702,13 @@ function handlePlayResult(cups) {
     gameState.lastPlayResult = { team, position, type: 'neutral', text: '0' };
   }
 
-  gameState.ballPosition += yards * team;
-
   // Handle fumble: possession flips BEFORE checking TD/safety
   if (isFumble) {
-    // Flip possession first - defense recovers
+    gameState.ballPosition += yards * team;
     gameState.offenseTeam = -team;
-    const newTeam = gameState.offenseTeam;
 
-    // Now check from NEW offense's perspective
-    // TD: ball in new offense's scoring endzone
-    if (gameState.ballPosition * newTeam > CUP_MAX) {
-      gameState.ballPosition = clampToField(gameState.ballPosition);
-      scoreTouchdown();
-      return;
-    }
-
-    // Safety: ball in new offense's own endzone (shouldn't happen on fumble, but handle it)
-    if (gameState.ballPosition * newTeam < CUP_MIN) {
-      gameState.ballPosition = clampToField(gameState.ballPosition);
-      scoreSafety();
-      return;
-    }
+    // Check TD/safety from NEW offense's perspective
+    if (checkScoring()) return;
 
     // Normal fumble recovery - start new possession for recovering team
     if (advanceGameClock()) return;
@@ -1653,18 +1716,8 @@ function handlePlayResult(cups) {
     return;
   }
 
-  // Non-fumble: check TD/safety from current offense's perspective
-  if (gameState.ballPosition * team > CUP_MAX) {
-    gameState.ballPosition = clampToField(gameState.ballPosition);
-    scoreTouchdown();
-    return;
-  }
-
-  if (gameState.ballPosition * team < CUP_MIN) {
-    gameState.ballPosition = clampToField(gameState.ballPosition);
-    scoreSafety();
-    return;
-  }
+  // Non-fumble: advance ball and check TD/safety
+  if (advanceBall(yards)) return;
 
   const madeFirstDown = gameState.ballPosition * team >= gameState.firstDownMarker * team;
   if (madeFirstDown) {
@@ -1799,7 +1852,12 @@ function scoreSafety() {
 function handleConversionChoice(choice) {
   // Ball at opponent's 5 yard line (which is in offense's scoring direction)
   gameState.ballPosition = gameState.offenseTeam * CUP_5;
-  gameState.phase = choice === 'xp' ? Phase.EXTRA_POINT : Phase.TWO_POINT_CONVERSION;
+  if (choice === 'xp') {
+    gameState.phase = Phase.EXTRA_POINT;
+  } else {
+    gameState.phaseData = { offensePlayers: 1, isQBSneak: true };
+    gameState.phase = Phase.TWO_POINT_CONVERSION;
+  }
 }
 
 function handleExtraPoint(result) {
@@ -1810,8 +1868,9 @@ function handleExtraPoint(result) {
   startKickoff();
 }
 
-function handleTwoPoint(result) {
-  if (result === 'make') addScore(gameState.offenseTeam, 2);
+function handleTwoPoint(cups) {
+  // cups: 1 = won (offense scores 2), 0 = tied or lost
+  if (cups === 1) addScore(gameState.offenseTeam, 2);
   startKickoff();
 }
 
