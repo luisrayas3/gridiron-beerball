@@ -144,6 +144,7 @@ body {
   font-size: 0.875rem;
 }
 
+
 .btn-team1 {
   background: var(--team1-color);
   color: white;
@@ -526,35 +527,9 @@ body {
   padding: 0.5rem 1rem;
 }
 
-.cup-select-grid {
-  display: flex;
-  justify-content: space-around;
-  padding: 0 10px;
-  margin: 0 calc(80px - 1.5rem); /* Endzone width minus controls padding */
-}
-
-.cup-select-btn {
-  width: 36px;
-  height: 36px;
+.button-row .btn.btn-compact {
+  width: 2.5rem;
   padding: 0;
-  font-size: 0.875rem;
-  border-radius: 6px;
-  color: white;
-}
-
-.cup-select-btn:not(.btn-success):not(.btn-warning):not(.btn-neutral):not(.btn-danger) {
-  background: rgba(255, 255, 255, 0.15);
-}
-
-.cup-select-btn:not(.btn-success):not(.btn-warning):not(.btn-neutral):not(.btn-danger):hover {
-  background: rgba(255, 255, 255, 0.25);
-}
-
-/* Special buttons (TD, Recovery) need auto width */
-.cup-select-grid .cup-select-btn.btn-special {
-  width: auto !important;
-  padding: 0 0.75rem;
-  min-width: 36px;
 }
 
 /* Game Actions */

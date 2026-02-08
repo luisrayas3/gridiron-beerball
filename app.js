@@ -352,7 +352,7 @@ function renderSneakControls(title, resultAction, offsidesAction, options = {}) 
 function renderCupSelectGrid(action, colorByPosition = false, goodDirection = 1) {
   const buttons = [];
   for (let cup = CUP_MIN; cup <= CUP_MAX; cup++) {
-    let btnClass = 'btn cup-select-btn';
+    let btnClass = 'btn btn-compact';
     // Modifier = cup * goodDirection + 1 (range -8 to +10)
     const modifier = cup * goodDirection + 1;
     // Total ball movement = base + modifier (range: +2 to +20)
@@ -427,7 +427,7 @@ function renderReturnGrid(action, landingPosition, returnerTeam) {
     const finalInOwnEndzone = finalPosition * returnerTeam < CUP_MIN;
     const isRecovery = finalInOwnEndzone && (inEndzone || returnModifier <= 0);
 
-    let btnClass = 'btn btn-small';
+    let btnClass = 'btn btn-compact';
     let label;
 
     if (isTD) {
@@ -469,17 +469,17 @@ function renderReturnGrid(action, landingPosition, returnerTeam) {
   // Team -1 (attacks left): TD on left, Recovery on right
   if (returnerTeam > 0) {
     if (hasRecovery) {
-      buttons.unshift(`<button class="btn btn-small btn-danger" data-action="${action}" data-cup="${recoveryCup}">Recovery</button>`);
+      buttons.unshift(`<button class="btn btn-danger" data-action="${action}" data-cup="${recoveryCup}">Recovery</button>`);
     }
     if (hasTD) {
-      buttons.push(`<button class="btn btn-small btn-success" data-action="${action}" data-cup="${tdCup}">Touchdown</button>`);
+      buttons.push(`<button class="btn btn-success" data-action="${action}" data-cup="${tdCup}">Touchdown</button>`);
     }
   } else {
     if (hasTD) {
-      buttons.unshift(`<button class="btn btn-small btn-success" data-action="${action}" data-cup="${tdCup}">Touchdown</button>`);
+      buttons.unshift(`<button class="btn btn-success" data-action="${action}" data-cup="${tdCup}">Touchdown</button>`);
     }
     if (hasRecovery) {
-      buttons.push(`<button class="btn btn-small btn-danger" data-action="${action}" data-cup="${recoveryCup}">Recovery</button>`);
+      buttons.push(`<button class="btn btn-danger" data-action="${action}" data-cup="${recoveryCup}">Recovery</button>`);
     }
   }
 
@@ -1181,8 +1181,8 @@ const controlRenderers = {
     return `
       <div class="control-section">
         <span class="offense-indicator offense-team${kickingTeamClass}">${kickingTeam.name} - kickoff (first of 2)</span>
-        <div class="cup-select-grid">${renderCupSelectGrid('kickoff-land', true, goodDirection)}</div>
-        <div class="button-row" style="margin-top: 1rem;">
+        <div class="button-row">${renderCupSelectGrid('kickoff-land', true, goodDirection)}</div>
+        <div class="button-row" style="margin-top: 0.5rem;">
           <button class="btn btn-neutral" data-action="kickoff-miss">Missed (+10)</button>
         </div>
       </div>`;
@@ -1204,7 +1204,7 @@ const controlRenderers = {
       <div class="control-section">
         <span class="offense-indicator offense-team${teamClass}">${offenseTeam().name} - return (first of 2)</span>
         <div class="button-row">${renderKickoffReturnGrid('return-hit')}</div>
-        <div class="button-row" style="margin-top: 1rem;">
+        <div class="button-row" style="margin-top: 0.5rem;">
           <button class="btn btn-neutral" data-action="return-miss">${missLabel}</button>
         </div>
       </div>`;
@@ -1303,8 +1303,8 @@ const controlRenderers = {
     return `
       <div class="control-section">
         <span class="offense-indicator offense-team${teamClass}">${offenseTeam().name} - punting (first of 2)</span>
-        <div class="cup-select-grid">${renderCupSelectGrid('punt-hit', true, goodDirection)}</div>
-        <div class="button-row" style="margin-top: 1rem;">
+        <div class="button-row">${renderCupSelectGrid('punt-hit', true, goodDirection)}</div>
+        <div class="button-row" style="margin-top: 0.5rem;">
           <button class="btn btn-neutral" data-action="punt-miss">Missed (+10)</button>
         </div>
       </div>`;
@@ -1319,7 +1319,7 @@ const controlRenderers = {
       <div class="control-section">
         <span class="offense-indicator offense-team${returnerTeamClass}">${defenseTeam().name} - punt return (first of 2)</span>
         <div class="button-row">${renderPuntReturnGrid('punt-return-hit')}</div>
-        <div class="button-row" style="margin-top: 1rem;">
+        <div class="button-row" style="margin-top: 0.5rem;">
           <button class="btn btn-neutral" data-action="punt-return-miss">${missLabel}</button>
         </div>
       </div>`;
