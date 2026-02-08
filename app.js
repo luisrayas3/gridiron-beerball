@@ -4,10 +4,6 @@ const STORAGE_KEY = 'gridiron-beerball-game';
 const STORAGE_VERSION = 3;  // Increment when state structure changes
 const CUPS_TO_FIRST_DOWN = 3;
 const TOTAL_CUPS = 19;
-const CUP_MIN = -9;
-const CUP_MAX = 9;
-const CUP_25 = 5;   // 25 yard line: team * CUP_25
-const CUP_5 = 9;    // 5 yard line: team * CUP_5
 const POSSESSIONS_PER_QUARTER = 4;
 const TOTAL_QUARTERS = 4;
 const BASE_KICK_DISTANCE = 10;  // Base punt/kick distance per rules
@@ -19,6 +15,8 @@ const FieldPosition = {
   FIELD_MIN: -9,
   FIELD_MAX: 9,
   MIDFIELD: 0,
+  YARD_25: 5,   // Cup position for 25 yard line
+  YARD_5: 9,    // Cup position for 5 yard line (same as FIELD_MAX)
 
   isOnField(pos) {
     return pos >= this.FIELD_MIN && pos <= this.FIELD_MAX;
@@ -214,11 +212,6 @@ function defenseTeam() {
   return getTeam(-gameState.offenseTeam);
 }
 
-// Clamp ball position to valid field range
-function clampToField(position) {
-  return Math.max(CUP_MIN, Math.min(CUP_MAX, position));
-}
-
 // Check if current ball position results in TD or safety, and handle it
 // Returns: 'td', 'safety', or null (play continues normally)
 // Clamps position and triggers scoring if applicable
@@ -226,15 +219,15 @@ function checkScoring() {
   const team = gameState.offenseTeam;
 
   // Touchdown: past opponent's endzone
-  if (gameState.ballPosition * team > CUP_MAX) {
-    gameState.ballPosition = clampToField(gameState.ballPosition);
+  if (FieldPosition.isTouchdown(gameState.ballPosition, team)) {
+    gameState.ballPosition = FieldPosition.clampToField(gameState.ballPosition);
     scoreTouchdown();
     return 'td';
   }
 
   // Safety: pushed back past own endzone
-  if (gameState.ballPosition * team < CUP_MIN) {
-    gameState.ballPosition = clampToField(gameState.ballPosition);
+  if (FieldPosition.isSafety(gameState.ballPosition, team)) {
+    gameState.ballPosition = FieldPosition.clampToField(gameState.ballPosition);
     scoreSafety();
     return 'safety';
   }
@@ -351,7 +344,7 @@ function renderSneakControls(title, resultAction, offsidesAction, options = {}) 
 // goodDirection: 1 for right, -1 for left (direction that's good for the thrower)
 function renderCupSelectGrid(action, colorByPosition = false, goodDirection = 1) {
   const buttons = [];
-  for (let cup = CUP_MIN; cup <= CUP_MAX; cup++) {
+  for (let cup = FieldPosition.FIELD_MIN; cup <= FieldPosition.FIELD_MAX; cup++) {
     let btnClass = 'btn btn-compact';
     // Modifier = cup * goodDirection + 1 (range -8 to +10)
     const modifier = cup * goodDirection + 1;
@@ -404,27 +397,19 @@ function renderReturnGrid(action, landingPosition, returnerTeam) {
   let tdCup = null;
 
   // Calculate missed result (where ball ends up if return is missed)
-  const missedPosition = clampToField(landingPosition);
+  const missedPosition = FieldPosition.clampToField(landingPosition);
 
   // Generate buttons for all cups in field order (left to right: -9 to +9)
-  for (let cup = CUP_MIN; cup <= CUP_MAX; cup++) {
+  for (let cup = FieldPosition.FIELD_MIN; cup <= FieldPosition.FIELD_MAX; cup++) {
     // Return modifier = cups gained toward scoring endzone (positive = good)
     const returnModifier = cup * returnerTeam + 1;
 
     // Calculate final position: landing + modifier in returner's direction
     const finalPosition = landingPosition + returnModifier * returnerTeam;
-    const clampedFinal = clampToField(finalPosition);
-
-    // TD: final position past opponent's endzone (returner's scoring endzone)
-    const isTD = finalPosition * returnerTeam > CUP_MAX;
-
-    // Check if ball landed in endzone
-    const inEndzone = landingPosition > CUP_MAX || landingPosition < CUP_MIN;
-
-    // Recovery: ball ends up in own endzone
-    // - For endzone landings: any hit that doesn't get ball out
-    // - For field landings: only if modifier <= 0
-    const finalInOwnEndzone = finalPosition * returnerTeam < CUP_MIN;
+    const clampedFinal = FieldPosition.clampToField(finalPosition);
+    const isTD = FieldPosition.isTouchdown(finalPosition, returnerTeam);
+    const inEndzone = FieldPosition.isInEndzone(landingPosition);
+    const finalInOwnEndzone = FieldPosition.isSafety(finalPosition, returnerTeam);
     const isRecovery = finalInOwnEndzone && (inEndzone || returnModifier <= 0);
 
     let btnClass = 'btn btn-compact';
@@ -446,7 +431,7 @@ function renderReturnGrid(action, landingPosition, returnerTeam) {
       continue; // Skip individual recovery buttons
     } else if (inEndzone) {
       // Ball in endzone - show effective position from touchback
-      const effectivePos = (clampedFinal + returnerTeam * CUP_MAX) * returnerTeam + 1;
+      const effectivePos = (clampedFinal + returnerTeam * FieldPosition.FIELD_MAX) * returnerTeam + 1;
       // +1 is neutral (matches "Missed +1"), higher is success
       btnClass += effectivePos > 1 ? ' btn-success' : ' btn-neutral';
       label = `+${effectivePos}`;
@@ -642,7 +627,7 @@ function renderDownDistance() {
   // Calculate down & distance info
   const team = gameState.offenseTeam;
   const cupsToGo = Math.max(0, (gameState.firstDownMarker - gameState.ballPosition) * team);
-  const isGoalRange = gameState.ballPosition * team > CUP_MAX - CUPS_TO_FIRST_DOWN;
+  const isGoalRange = gameState.ballPosition * team > FieldPosition.FIELD_MAX - CUPS_TO_FIRST_DOWN;
   const downText = (isGoalRange || cupsToGo <= 0)
     ? `${downNames[gameState.down - 1]} & Goal`
     : `${downNames[gameState.down - 1]} & ${cupsToGo}`;
@@ -692,7 +677,7 @@ function calculateBallPosition() {
     case Phase.KICKOFF_KICK:
     case Phase.ONSIDE_KICK:
       // Kicking from 25 yard line
-      return team * CUP_25;
+      return team * FieldPosition.YARD_25;
 
     case Phase.TOUCHDOWN_CONVERSION:
       // Ball in scoring endzone
@@ -720,10 +705,10 @@ function calculateBallPosition() {
 function renderBallRow(ballPos, isReturnPhase, offenseGoesRight) {
   const ballRow = document.createElement('div');
   ballRow.className = 'field-row ball-row';
-  const ENDZONE = CUP_MAX + 1;  // 10
+  const ENDZONE = FieldPosition.FIELD_MAX + 1;  // 10
 
   // Ball on field (-9 to +9) or in endzone during returns
-  const onField = ballPos >= CUP_MIN && ballPos <= CUP_MAX;
+  const onField = FieldPosition.isOnField(ballPos);
   const inEndzone = ballPos === -ENDZONE || ballPos === ENDZONE;
   const showBallInRow = onField || (isReturnPhase && inEndzone);
 
@@ -768,6 +753,31 @@ function renderBallRow(ballPos, isReturnPhase, offenseGoesRight) {
   return ballRow;
 }
 
+// Calculate return effect for a cup in kickoff/punt return phases
+// Returns { className, text } for the effect indicator
+function getReturnEffect(cupIndex, landing, returnerTeam) {
+  const inEndzone = FieldPosition.isInEndzone(landing);
+  const returnModifier = cupIndex * returnerTeam + 1;
+  const finalPosition = landing + returnModifier * returnerTeam;
+  const clampedFinal = FieldPosition.clampToField(finalPosition);
+  const isTD = FieldPosition.isTouchdown(finalPosition, returnerTeam);
+  const finalInOwnEndzone = FieldPosition.isSafety(finalPosition, returnerTeam);
+  const isRecovery = finalInOwnEndzone && (inEndzone || returnModifier <= 0);
+
+  if (isTD) return { className: 'effect-gain', text: 'TD' };
+  if (isRecovery) return { className: 'effect-turnover', text: 'REC' };
+  if (inEndzone) {
+    const effectivePos = (clampedFinal + returnerTeam * FieldPosition.FIELD_MAX) * returnerTeam + 1;
+    return {
+      className: effectivePos > 1 ? 'effect-gain' : 'effect-neutral',
+      text: `+${effectivePos}`
+    };
+  }
+  if (returnModifier >= 1) return { className: 'effect-gain', text: `+${returnModifier}` };
+  if (returnModifier === 0) return { className: 'effect-neutral', text: '0' };
+  return { className: 'effect-loss', text: String(returnModifier) };
+}
+
 // Get the effect class and text for a single cup in the effect row
 function getCupEffect(cupIndex, phase) {
   const effect = { className: '', text: '' };
@@ -805,48 +815,13 @@ function getCupEffect(cupIndex, phase) {
     else effect.className = 'effect-loss';
     effect.text = `+${totalMovement}`;
   } else if (phase === Phase.KICKOFF_RETURN && gameState.phaseData?.kickLanding != null) {
-    const landing = gameState.phaseData.kickLanding;
-    const inEndzone = landing > CUP_MAX || landing < CUP_MIN;
-    const returnModifier = cupIndex * team + 1;
-    const finalPosition = landing + returnModifier * team;
-    const clampedFinal = clampToField(finalPosition);
-    const isTD = finalPosition * team > CUP_MAX;
-    const finalInOwnEndzone = finalPosition * team < CUP_MIN;
-    const isRecovery = finalInOwnEndzone && (inEndzone || returnModifier <= 0);
-
-    if (isTD) { effect.className = 'effect-gain'; effect.text = 'TD'; }
-    else if (isRecovery) { effect.className = 'effect-turnover'; effect.text = 'REC'; }
-    else if (inEndzone) {
-      const effectivePos = (clampedFinal + team * CUP_MAX) * team + 1;
-      // +1 is neutral (matches "Missed +1"), higher is gain
-      effect.className = effectivePos > 1 ? 'effect-gain' : 'effect-neutral';
-      effect.text = `+${effectivePos}`;
-    }
-    else if (returnModifier >= 1) { effect.className = 'effect-gain'; effect.text = `+${returnModifier}`; }
-    else if (returnModifier === 0) { effect.className = 'effect-neutral'; effect.text = '0'; }
-    else { effect.className = 'effect-loss'; effect.text = String(returnModifier); }
+    const result = getReturnEffect(cupIndex, gameState.phaseData.kickLanding, team);
+    effect.className = result.className;
+    effect.text = result.text;
   } else if (phase === Phase.PUNT_RETURN && gameState.phaseData?.puntLanding != null) {
-    const landing = gameState.phaseData.puntLanding;
-    const inEndzone = landing > CUP_MAX || landing < CUP_MIN;
-    const returnerTeam = -team;
-    const returnModifier = cupIndex * returnerTeam + 1;
-    const finalPosition = landing + returnModifier * returnerTeam;
-    const clampedFinal = clampToField(finalPosition);
-    const isTD = finalPosition * returnerTeam > CUP_MAX;
-    const finalInOwnEndzone = finalPosition * returnerTeam < CUP_MIN;
-    const isRecovery = finalInOwnEndzone && (inEndzone || returnModifier <= 0);
-
-    if (isTD) { effect.className = 'effect-gain'; effect.text = 'TD'; }
-    else if (isRecovery) { effect.className = 'effect-turnover'; effect.text = 'REC'; }
-    else if (inEndzone) {
-      const effectivePos = (clampedFinal + returnerTeam * CUP_MAX) * returnerTeam + 1;
-      // +1 is neutral (matches "Missed +1"), higher is gain
-      effect.className = effectivePos > 1 ? 'effect-gain' : 'effect-neutral';
-      effect.text = `+${effectivePos}`;
-    }
-    else if (returnModifier >= 1) { effect.className = 'effect-gain'; effect.text = `+${returnModifier}`; }
-    else if (returnModifier === 0) { effect.className = 'effect-neutral'; effect.text = '0'; }
-    else { effect.className = 'effect-loss'; effect.text = String(returnModifier); }
+    const result = getReturnEffect(cupIndex, gameState.phaseData.puntLanding, -team);
+    effect.className = result.className;
+    effect.text = result.text;
   } else if (phase === Phase.THROW_PLAY) {
     // Relative position: cup * team (positive = toward scoring endzone)
     const relPos = cupIndex * team;
@@ -901,7 +876,7 @@ function renderEffectRow(offenseGoesRight) {
     effectRow.appendChild(throwArrow);
   }
 
-  for (let cup = CUP_MIN; cup <= CUP_MAX; cup++) {
+  for (let cup = FieldPosition.FIELD_MIN; cup <= FieldPosition.FIELD_MAX; cup++) {
     const cupEffect = getCupEffect(cup, gameState.phase);
     // Only render cups that have an effect
     if (!cupEffect.className && !cupEffect.text) continue;
@@ -921,7 +896,7 @@ function renderNumberRow() {
   const numberRow = document.createElement('div');
   numberRow.className = 'field-row number-row';
 
-  for (let cup = CUP_MIN; cup <= CUP_MAX; cup++) {
+  for (let cup = FieldPosition.FIELD_MIN; cup <= FieldPosition.FIELD_MAX; cup++) {
     const num = document.createElement('span');
     num.className = 'yard-number';
     // Major markers at 50 (cup 0), 25s (cups ±5)
@@ -1063,7 +1038,7 @@ function renderPlayerCircles() {
 
 // Render line of scrimmage marker
 function renderLineOfScrimmage(ballPos) {
-  if (ballPos < CUP_MIN || ballPos > CUP_MAX) return null;
+  if (!FieldPosition.isOnField(ballPos)) return null;
 
   const markerEl = document.createElement('div');
   markerEl.className = 'line-of-scrimmage';
@@ -1075,7 +1050,7 @@ function renderLineOfScrimmage(ballPos) {
 function renderFirstDownMarker() {
   if (!PLAY_PHASES.includes(gameState.phase)) return null;
   const marker = gameState.firstDownMarker;
-  if (marker < CUP_MIN - 1 || marker > CUP_MAX + 1) return null;
+  if (marker < FieldPosition.FIELD_MIN - 1 || marker > FieldPosition.FIELD_MAX + 1) return null;
 
   const markerEl = document.createElement('div');
   markerEl.className = 'first-down-marker';
@@ -1085,7 +1060,7 @@ function renderFirstDownMarker() {
 
 // Update endzone labels and optional football
 function renderEndzones(ballPos, isReturnPhase) {
-  const ENDZONE = CUP_MAX + 1;
+  const ENDZONE = FieldPosition.FIELD_MAX + 1;
   elements.endzoneLeft.querySelector('.endzone-label').textContent = gameState.team1.name.toUpperCase();
   elements.endzoneRight.querySelector('.endzone-label').textContent = gameState.team2.name.toUpperCase();
 
@@ -1198,7 +1173,7 @@ const controlRenderers = {
   [Phase.KICKOFF_RETURN]: () => {
     const teamClass = teamCssClass(gameState.offenseTeam);
     const landing = gameState.phaseData?.kickLanding ?? 0;
-    const inEndzone = landing > CUP_MAX || landing < CUP_MIN;
+    const inEndzone = FieldPosition.isInEndzone(landing);
     const missLabel = inEndzone ? 'Missed (+1)' : 'Missed (0)';
     return `
       <div class="control-section">
@@ -1313,7 +1288,7 @@ const controlRenderers = {
   [Phase.PUNT_RETURN]: () => {
     const returnerTeamClass = teamCssClass(-gameState.offenseTeam);
     const landing = gameState.phaseData?.puntLanding ?? 0;
-    const inEndzone = landing > CUP_MAX || landing < CUP_MIN;
+    const inEndzone = FieldPosition.isInEndzone(landing);
     const missLabel = inEndzone ? 'Missed (+1)' : 'Missed (0)';
     return `
       <div class="control-section">
@@ -1449,7 +1424,7 @@ function handleCoinToss(receivingTeam) {
 
 function enterKickoffPhase(allowOnside = true) {
   // Ball at kicking team's 25
-  gameState.ballPosition = -gameState.offenseTeam * CUP_25;
+  gameState.ballPosition = -gameState.offenseTeam * FieldPosition.YARD_25;
   gameState.phaseData = { allowOnside };
   gameState.phase = Phase.KICKOFF;
 }
@@ -1464,7 +1439,7 @@ function handleKickoffLand(cup) {
   // Modifier: cup * (-team) + 1 gives +2 to +20 range
   const kickModifier = cup * (-team) + 1;
   // Kicking team's 25 is in their territory (team's direction from midfield)
-  const startPos = team * CUP_25;
+  const startPos = team * FieldPosition.YARD_25;
   // Total distance then kick in -team direction (toward receiver's defending endzone)
   const landingPos = startPos + (BASE_KICK_DISTANCE + kickModifier) * (-team);
   gameState.phaseData = { kickLanding: landingPos };
@@ -1475,7 +1450,7 @@ function handleKickoffMiss() {
   // Both attempts missed - base kick distance, no modifier
   const team = gameState.offenseTeam;
   // Kicking team's 25 is in their territory (team's direction from midfield)
-  const startPos = team * CUP_25;
+  const startPos = team * FieldPosition.YARD_25;
   // Kick in -team direction (toward receiver's defending endzone)
   const landingPos = startPos + BASE_KICK_DISTANCE * (-team);
   gameState.phaseData = { kickLanding: landingPos };
@@ -1501,39 +1476,44 @@ function handleOnsideMiss() {
   startNewPossession();
 }
 
+// Calculate return outcome: 'td', 'recovery', or 'normal'
+function calculateReturn(cup, landing, returnerTeam) {
+  const returnModifier = cup * returnerTeam + 1;
+  const finalPosition = landing + returnModifier * returnerTeam;
+
+  if (FieldPosition.isTouchdown(finalPosition, returnerTeam)) {
+    return { type: 'td', finalPosition, returnModifier };
+  }
+  if (returnModifier <= 0 && FieldPosition.isSafety(finalPosition, returnerTeam)) {
+    return { type: 'recovery', finalPosition, returnModifier };
+  }
+  return { type: 'normal', finalPosition, returnModifier };
+}
+
 function handleReturn(cup) {
   const team = gameState.offenseTeam;
-  const kickLanding = gameState.phaseData.kickLanding;
-  // Return modifier = cup * team + 1 (so midfield = +1, not 0)
-  const returnModifier = cup * team + 1;
-  // Final position = landing + modifier in returner's direction
-  const finalPosition = kickLanding + returnModifier * team;
+  const result = calculateReturn(cup, gameState.phaseData.kickLanding, team);
+  gameState.phaseData = null;
 
-  // TD: past opponent's endzone (team's scoring endzone)
-  if (finalPosition * team > CUP_MAX) {
-    gameState.phaseData = null;
+  if (result.type === 'td') {
     scoreTouchdown();
     return;
   }
 
-  // Recovery: zero or negative modifier AND past own endzone
-  if (returnModifier <= 0 && finalPosition * team < CUP_MIN) {
-    const kickingTeam = -team;
-    gameState.offenseTeam = kickingTeam;
-    // Ball at receiver's 5 yard line (which is now in kicking team's direction)
-    gameState.ballPosition = kickingTeam * CUP_5;
-    gameState.phaseData = null;
+  if (result.type === 'recovery') {
+    // Kicking team recovers at receiver's 5 yard line
+    gameState.offenseTeam = -team;
+    gameState.ballPosition = -team * FieldPosition.YARD_5;
     startNewPossession();
     return;
   }
 
-  gameState.ballPosition = clampToField(finalPosition);
-  gameState.phaseData = null;
+  gameState.ballPosition = FieldPosition.clampToField(result.finalPosition);
   startNewPossession();
 }
 
 function handleReturnMiss() {
-  gameState.ballPosition = clampToField(gameState.phaseData.kickLanding);
+  gameState.ballPosition = FieldPosition.clampToField(gameState.phaseData.kickLanding);
   gameState.phaseData = null;
   startNewPossession();
 }
@@ -1575,20 +1555,20 @@ function handleThrowResultSimple(result) {
     const newTeam = gameState.offenseTeam;
 
     // Check for defensive TD (ball in new offense's scoring endzone)
-    if (gameState.ballPosition * newTeam > CUP_MAX) {
-      gameState.ballPosition = clampToField(gameState.ballPosition);
+    if (FieldPosition.isTouchdown(gameState.ballPosition, newTeam)) {
+      gameState.ballPosition = FieldPosition.clampToField(gameState.ballPosition);
       scoreTouchdown();
       return;
     }
 
     // Check for safety (ball in new offense's own endzone - shouldn't happen but handle it)
-    if (gameState.ballPosition * newTeam < CUP_MIN) {
-      gameState.ballPosition = clampToField(gameState.ballPosition);
+    if (FieldPosition.isSafety(gameState.ballPosition, newTeam)) {
+      gameState.ballPosition = FieldPosition.clampToField(gameState.ballPosition);
       scoreSafety();
       return;
     }
 
-    gameState.ballPosition = clampToField(gameState.ballPosition);
+    gameState.ballPosition = FieldPosition.clampToField(gameState.ballPosition);
     if (advanceGameClock()) return;
     startNewPossession();
     return;
@@ -1614,31 +1594,21 @@ function handleThrowResultSimple(result) {
   gameState.ballPosition += yards * team;
 
   // Check for touchdown (past opponent's endzone)
-  if (gameState.ballPosition * team > CUP_MAX) {
-    gameState.ballPosition = clampToField(gameState.ballPosition);
+  if (FieldPosition.isTouchdown(gameState.ballPosition, team)) {
+    gameState.ballPosition = FieldPosition.clampToField(gameState.ballPosition);
     scoreTouchdown();
     return;
   }
 
   // Check for safety (past own endzone)
-  if (gameState.ballPosition * team < CUP_MIN) {
-    gameState.ballPosition = clampToField(gameState.ballPosition);
+  if (FieldPosition.isSafety(gameState.ballPosition, team)) {
+    gameState.ballPosition = FieldPosition.clampToField(gameState.ballPosition);
     scoreSafety();
     return;
   }
 
-  gameState.ballPosition = clampToField(gameState.ballPosition);
-
-  // Check for first down (ball reached or passed marker in team's direction)
-  const madeFirstDown = gameState.ballPosition * team >= gameState.firstDownMarker * team;
-
-  if (madeFirstDown) {
-    gameState.down = 1;
-    setFirstDownMarker();
-  } else {
-    gameState.down++;
-  }
-  checkDowns();
+  gameState.ballPosition = FieldPosition.clampToField(gameState.ballPosition);
+  checkFirstDownAndAdvance();
 }
 
 function handlePlayResult(cups) {
@@ -1656,21 +1626,13 @@ function handlePlayResult(cups) {
         return;
       }
       // Safety not possible on sneak win, but advanceBall handles it
-
       gameState.lastPlayResult = { team, position, type: 'gain', text: '1' };
-
-      const madeFirstDown = gameState.ballPosition * team >= gameState.firstDownMarker * team;
-      if (madeFirstDown) {
-        gameState.down = 1;
-        setFirstDownMarker();
-      } else {
-        gameState.down++;
-      }
+      checkFirstDownAndAdvance();
     } else {
       gameState.lastPlayResult = { team, position, type: 'neutral', text: '0' };
       gameState.down++;
+      checkDowns();
     }
-    checkDowns();
     return;
   }
 
@@ -1720,7 +1682,12 @@ function handlePlayResult(cups) {
 
   // Non-fumble: advance ball and check TD/safety
   if (advanceBall(yards)) return;
+  checkFirstDownAndAdvance();
+}
 
+// Check first down and advance to next down (or reset if first down made)
+function checkFirstDownAndAdvance() {
+  const team = gameState.offenseTeam;
   const madeFirstDown = gameState.ballPosition * team >= gameState.firstDownMarker * team;
   if (madeFirstDown) {
     gameState.down = 1;
@@ -1748,10 +1715,10 @@ function handleOffsides(dir) {
   const newPosition = gameState.ballPosition + dir * team;
 
   // Clamp at 5 yard lines - no safety or TD from offsides
-  if (newPosition * team > CUP_5) {
-    gameState.ballPosition = team * CUP_5;
-  } else if (newPosition * team < -CUP_5) {
-    gameState.ballPosition = -team * CUP_5;
+  if (newPosition * team > FieldPosition.YARD_5) {
+    gameState.ballPosition = team * FieldPosition.YARD_5;
+  } else if (newPosition * team < -FieldPosition.YARD_5) {
+    gameState.ballPosition = -team * FieldPosition.YARD_5;
   } else {
     gameState.ballPosition = newPosition;
   }
@@ -1789,31 +1756,23 @@ function handlePuntMiss() {
 
 function handlePuntReturn(cup) {
   const returnerTeam = -gameState.offenseTeam;
-  // Return modifier = cup * returnerTeam + 1 (so midfield = +1, not 0)
-  const returnModifier = cup * returnerTeam + 1;
-  // Final position = landing + modifier in returner's direction
-  const finalPosition = gameState.phaseData.puntLanding + returnModifier * returnerTeam;
+  const result = calculateReturn(cup, gameState.phaseData.puntLanding, returnerTeam);
+  gameState.phaseData = null;
 
-  // TD: past opponent's endzone (returner's scoring endzone)
-  if (finalPosition * returnerTeam > CUP_MAX) {
+  if (result.type === 'td') {
     gameState.offenseTeam = returnerTeam;
-    gameState.phaseData = null;
     scoreTouchdown();
     return;
   }
 
-  // Recovery: zero or negative modifier AND past own endzone
-  if (returnModifier <= 0 && finalPosition * returnerTeam < CUP_MIN) {
-    // Punt recovery by punting team at returner's 5 yard line
-    // Returner's 5 is in their defending territory (opposite their attack direction)
-    gameState.ballPosition = -returnerTeam * CUP_5;
-    gameState.phaseData = null;
-    startNewPossession(); // Punting team keeps possession
+  if (result.type === 'recovery') {
+    // Punting team recovers at returner's 5 yard line
+    gameState.ballPosition = -returnerTeam * FieldPosition.YARD_5;
+    startNewPossession();
     return;
   }
 
-  gameState.ballPosition = clampToField(finalPosition);
-  gameState.phaseData = null;
+  gameState.ballPosition = FieldPosition.clampToField(result.finalPosition);
   if (flipPossession(true)) return;
   startNewPossession();
 }
@@ -1821,7 +1780,7 @@ function handlePuntReturn(cup) {
 function handlePuntReturnMiss() {
   // Both attempts missed - return modifier = 0 (not negative, so no recovery)
   // Ball stays at punt landing spot (clamped to field)
-  gameState.ballPosition = clampToField(gameState.phaseData.puntLanding);
+  gameState.ballPosition = FieldPosition.clampToField(gameState.phaseData.puntLanding);
   gameState.phaseData = null;
   if (flipPossession(true)) return; // Quarter transition handled
   startNewPossession();
@@ -1840,8 +1799,8 @@ function handleFieldGoal(result) {
 
 function scoreTouchdown() {
   addScore(gameState.offenseTeam, 6);
-  // Ball in the endzone they scored in (team's scoring endzone = team * (CUP_MAX+1))
-  gameState.ballPosition = gameState.offenseTeam * (CUP_MAX + 1);
+  // Ball in the endzone they scored in (team's scoring endzone = team * (FieldPosition.FIELD_MAX+1))
+  gameState.ballPosition = gameState.offenseTeam * (FieldPosition.FIELD_MAX + 1);
   gameState.phase = Phase.TOUCHDOWN_CONVERSION;
 }
 
@@ -1853,7 +1812,7 @@ function scoreSafety() {
 
 function handleConversionChoice(choice) {
   // Ball at opponent's 5 yard line (which is in offense's scoring direction)
-  gameState.ballPosition = gameState.offenseTeam * CUP_5;
+  gameState.ballPosition = gameState.offenseTeam * FieldPosition.YARD_5;
   if (choice === 'xp') {
     gameState.phase = Phase.EXTRA_POINT;
   } else {
@@ -1894,11 +1853,11 @@ function setFirstDownMarker() {
   const team = gameState.offenseTeam;
   // Marker is CUPS_TO_FIRST_DOWN cups toward scoring endzone, capped at endzone
   const newMarker = gameState.ballPosition + CUPS_TO_FIRST_DOWN * team;
-  // Cap at endzone (CUP_MAX + 1 or CUP_MIN - 1)
+  // Cap at endzone (FieldPosition.FIELD_MAX + 1 or FieldPosition.FIELD_MIN - 1)
   if (team > 0) {
-    gameState.firstDownMarker = Math.min(CUP_MAX + 1, newMarker);
+    gameState.firstDownMarker = Math.min(FieldPosition.FIELD_MAX + 1, newMarker);
   } else {
-    gameState.firstDownMarker = Math.max(CUP_MIN - 1, newMarker);
+    gameState.firstDownMarker = Math.max(FieldPosition.FIELD_MIN - 1, newMarker);
   }
 }
 
