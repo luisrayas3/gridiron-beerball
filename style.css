@@ -481,11 +481,23 @@ body {
   padding: 0;
 }
 
+#last-play-result {
+  text-align: center;
+  padding: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  min-height: 1.5em;
+}
+
 #game-actions {
   display: flex;
   justify-content: center;
   gap: 1rem;
-  padding-top: 0.5rem;
+}
+
+#undo:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .offense-indicator {
