@@ -1163,12 +1163,15 @@ const controlRenderers = {
     Button.team(-1, gameState.team2.name, 'coin-toss', { team: -1 })
   ),
 
-  [Phase.KICKOFF]: () => controlSection(
-    `${defenseTeam().name} - kickoff type`,
-    -gameState.offenseTeam,
-    Button.primary('Regular', 'regular-kickoff') +
-    Button.neutral('Onside', 'onside-kick')
-  ),
+  [Phase.KICKOFF]: () => {
+    const buttons = Button.primary('Regular', 'regular-kickoff');
+    const onsideBtn = gameState.phaseData?.allowOnside ? Button.neutral('Onside', 'onside-kick') : '';
+    return controlSection(
+      `${defenseTeam().name} - kickoff type`,
+      -gameState.offenseTeam,
+      buttons + onsideBtn
+    );
+  },
 
   [Phase.KICKOFF_KICK]: () => {
     const kickingTeam = defenseTeam();
@@ -1441,14 +1444,13 @@ function handleAction(e) {
 function handleCoinToss(receivingTeam) {
   gameState.offenseTeam = receivingTeam;
   gameState.openingKickoffReceiver = receivingTeam;
-  enterKickoffPhase();
+  enterKickoffPhase(false);  // No onside at start of game
 }
 
-function enterKickoffPhase() {
-  // Ball in kicking team's endzone (opposite of receiver)
-  // Ball displayed at kicking team's endzone (kicking team = defense = -offenseTeam)
-  // Right endzone = +10, Left endzone = -10
-  gameState.ballPosition = gameState.offenseTeam * (CUP_MAX + 1);
+function enterKickoffPhase(allowOnside = true) {
+  // Ball at kicking team's 25
+  gameState.ballPosition = -gameState.offenseTeam * CUP_25;
+  gameState.phaseData = { allowOnside };
   gameState.phase = Phase.KICKOFF;
 }
 
@@ -1939,7 +1941,7 @@ function advanceGameClock() {
     if (gameState.quarter === 3) {
       // Second half kickoff: team that didn't receive opening kickoff now receives
       gameState.offenseTeam = -gameState.openingKickoffReceiver;
-      enterKickoffPhase();
+      enterKickoffPhase(false);  // No onside at start of half
       return true;
     }
   }

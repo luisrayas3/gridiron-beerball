@@ -40,7 +40,7 @@ Kickoffs occur at the start of each half and after every score.
 
 The kicking team and receiving team each have opportunities to throw a pong ball for better field position. In certain cases, a kick recovery by the offense is possible. A kick return for a touchdown is also possible.
 
-Instead of a normal kickoff, the kicking team may attempt an onside kick. If successful, the kicking team recovers the ball and becomes the offense. If it fails, the receiving team gets the ball at the kicking team's 35 yard line.
+Instead of a normal kickoff, the kicking team may attempt an onside kick (only after a score, not at the start of a half). If successful, the kicking team recovers the ball and becomes the offense. If it fails, the receiving team gets the ball at the kicking team's 25 yard line.
 
 See [Kicks & returns](#kicks--returns).
 
@@ -54,7 +54,7 @@ On any down, the offense can choose from:
 |---|---|
 | Punt | Kick the ball away; possession flips after the return |
 | Field goal | Attempt to score 3 points |
-| QB sneak | 1v1 flip cup — low risk, small gain |
+| Sneak | 1v1 flip cup — low risk, small gain |
 | Run (2v3, 3v4, 4v5) | Flip cup race — higher risk and reward |
 | Pass | Up to 3 pong shots — variable outcomes including turnovers |
 
@@ -131,7 +131,7 @@ Kickoffs, punts, and their respective returns share the same core mechanics.
 - **Kick recovery:** If the returner hits a cup but the ball ends up in their own endzone, the kicking team recovers at the returner's 5 yard line. This includes any cup hit when the kick landed in the endzone that doesn't get the ball out. For example, a +19 kick (4 cups into the endzone) only has 6 safe cups - the remaining 13 are all recoveries.
 - **Touchback:** If the returner misses both throws, the ball is placed at the returner's 5 yard line (touchback). This is the only way to avoid a recovery when the kick lands deep in the endzone.
 
-**Onside kick:** Instead of a normal kickoff, the kicking team may attempt an onside kick:
+**Onside kick:** Instead of a normal kickoff (only after a score, not at start of half), the kicking team may attempt an onside kick:
 
 - 1 attempt only (not 2)
 - Must hit the kicking team's 35, 40, or 45 yard line
@@ -140,15 +140,15 @@ Kickoffs, punts, and their respective returns share the same core mechanics.
 
 ### Running
 
-Running plays are relay-style flip cup races. The offense chooses how many players to send (1-4), and the defense sends one more (except for QB sneaks). The relay proceeds in the direction the offense is attacking.
+Running plays are relay-style flip cup races. The offense chooses how many players to send (1-4), and the defense sends one more (except for sneaks). The relay proceeds in the direction the offense is attacking.
 
 **The hike:** The first offensive player "hikes" the ball — as soon as they lift their cup off the table, the play is live.
 
 **Offsides:** Any cup lifted before it should be (before the hike, or before the previous teammate has finished) is offsides — 1-cup penalty against that team and the down is repeated. Offsides cannot cause a safety or touchdown; if it occurs at the 5 yard line, the ball stays at the 5.
 
-**QB sneak (1v1):** A low-risk play.
+**Sneak (1v1):** A low-risk play.
 
-- Offense wins: Gain 1 yard
+- Offense wins: Gain 1 yard (touchdown if at opponent's 5)
 - Defense wins or ties: No gain (0 yards)
 - No fumble possible
 
@@ -231,7 +231,7 @@ After a touchdown, the scoring team chooses:
 
 **Extra point (1 point):** A field goal attempt from the 5 yard line. Standard field goal rules apply, including the blocking rule.
 
-**Two-point conversion (2 points):** A 1v1 flip cup (QB sneak rules). Win = 2 points. Tie or lose = 0 points.
+**Two-point conversion (2 points):** A 1v1 flip cup (sneak rules). Win = 2 points. Tie or lose = 0 points. Offsides by offense = no good; offsides by defense = automatic 2 points.
 
 ## Quick reference
 
@@ -245,8 +245,8 @@ After a touchdown, the scoring team chooses:
 
 | Run play | Result |
 |---|---|
-| QB sneak — offense wins | +1 yard |
-| QB sneak — defense wins or ties | 0 yards |
+| Sneak — offense wins | +1 yard |
+| Sneak — defense wins or ties | 0 yards |
 | Flip cup — offense wins | Advance by schedule (1/2/5/9/TD) |
 | Flip cup — defense wins | Lose by schedule |
 | Flip cup — tie | No gain, down consumed |
