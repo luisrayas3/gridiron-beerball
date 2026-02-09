@@ -201,6 +201,18 @@ The offense gets up to 3 throws from their end zone. The first meaningful result
 
 **Defensive interception shot:** If the offense hits a cup on the 2nd or 3rd throw, the defense gets one chance to intercept by hitting the exact same cup. If successful, it's an interception. No interception shot is allowed in response to cups made on the 1st throw.
 
+**Defensive incomplete response:** When a pass is incomplete, the defense gets one chance to punish the offense. The defense throws from their endzone:
+
+| Cup | Result |
+|---|---|
+| Defense's 5 through 50 yard line | Offense gains 1 yard |
+| Offense's 45 | No change |
+| Offense's 40 | Offense loses 1 yard |
+| Offense's 35 | Offense loses 2 yards |
+| Offense's 30 | Offense loses 3 yards |
+| Offense's 25, 20, 15, 10, 5 | **Sack fumble** — defense recovers at spot minus 3 yards |
+| Miss | No change |
+
 **Deep zone (opponent's 15, 10, 5):** Called throws. Before throwing, announce which cup you're targeting.
 
 | Called cup | Result |
@@ -261,6 +273,7 @@ After a touchdown, the scoring team chooses:
 | Deep zone — call 15/10/5 | +6 / +9 / TD |
 | All incomplete | Down consumed |
 | Interception shot | 2nd/3rd throw: defense can match cup |
+| Incomplete + defense shot | 1 throw: +1 to fumble based on cup |
 
 | Kicks & returns | Result |
 |---|---|

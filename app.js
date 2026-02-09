@@ -68,7 +68,8 @@ const Phase = {
   TWO_POINT_CONVERSION: 'two_point_conversion',
   GAME_OVER: 'game_over',
   OVERTIME_START: 'overtime_start',
-  OVERTIME_FIELD_GOAL: 'overtime_field_goal'
+  OVERTIME_FIELD_GOAL: 'overtime_field_goal',
+  INCOMPLETE_DEFENSE_SHOT: 'incomplete_defense_shot'
 };
 
 // Throwing zones (relative positions from offense perspective)
@@ -706,8 +707,8 @@ function renderDownDistance() {
 const RETURN_PHASES = [Phase.KICKOFF_RETURN, Phase.PUNT_RETURN];
 const THROWING_PHASES = [Phase.THROW_PLAY, Phase.KICKOFF_KICK, Phase.ONSIDE_KICK, Phase.KICKOFF_RETURN,
                          Phase.PUNT, Phase.PUNT_RETURN, Phase.FIELD_GOAL_ATTEMPT, Phase.EXTRA_POINT,
-                         Phase.OVERTIME_FIELD_GOAL];
-const PLAY_PHASES = [Phase.NORMAL_PLAY, Phase.PLAY_RESULT, Phase.THROW_PLAY, Phase.FIELD_GOAL_ATTEMPT, Phase.PUNT];
+                         Phase.OVERTIME_FIELD_GOAL, Phase.INCOMPLETE_DEFENSE_SHOT];
+const PLAY_PHASES = [Phase.NORMAL_PLAY, Phase.PLAY_RESULT, Phase.THROW_PLAY, Phase.FIELD_GOAL_ATTEMPT, Phase.PUNT, Phase.INCOMPLETE_DEFENSE_SHOT];
 
 // Calculate ball display position based on current phase
 function calculateBallPosition() {
@@ -876,6 +877,30 @@ function getCupEffect(cupIndex, phase) {
       effect.className = 'effect-gain';
       effect.text = '5+';
     }
+  } else if (phase === Phase.INCOMPLETE_DEFENSE_SHOT) {
+    // Defense throws from their endzone toward offense's endzone
+    // relPos from defense's perspective (positive = toward offense's endzone)
+    const defenseTeam = -team;
+    const relPos = cupIndex * defenseTeam;
+
+    if (relPos <= 0) {
+      // Defense's side + 50: +1 for offense
+      effect.className = 'effect-gain';
+      effect.text = '+1';
+    } else if (relPos === 1) {
+      // Offense's 45: 0
+      effect.className = 'effect-neutral';
+      effect.text = '0';
+    } else if (relPos >= 2 && relPos <= 4) {
+      // Offense's 40/35/30: -1/-2/-3
+      const yards = -(relPos - 1);  // 2→-1, 3→-2, 4→-3
+      effect.className = 'effect-loss';
+      effect.text = String(yards);
+    } else if (relPos >= 5) {
+      // Offense's 25-5: sack fumble
+      effect.className = 'effect-turnover';
+      effect.text = 'FUM';
+    }
   }
 
   return effect;
@@ -887,9 +912,10 @@ function renderEffectRow(offenseGoesRight) {
   effectRow.className = 'field-row effect-row';
 
   if (THROWING_PHASES.includes(gameState.phase)) {
-    // FG/XP kick toward own goal (backward), all others go in offense direction
+    // FG/XP kick toward own goal (backward), defense shot also goes opposite direction
     const isFieldGoalKick = [Phase.FIELD_GOAL_ATTEMPT, Phase.EXTRA_POINT, Phase.OVERTIME_FIELD_GOAL].includes(gameState.phase);
-    const throwerGoesRight = isFieldGoalKick ? !offenseGoesRight : offenseGoesRight;
+    const isDefenseShot = gameState.phase === Phase.INCOMPLETE_DEFENSE_SHOT;
+    const throwerGoesRight = (isFieldGoalKick || isDefenseShot) ? !offenseGoesRight : offenseGoesRight;
     const throwArrow = document.createElement('span');
     throwArrow.className = `direction-arrow ${throwerGoesRight ? 'left' : 'right'}`;
     // Use play-specific emoji for throw indicator
@@ -900,6 +926,8 @@ function renderEffectRow(offenseGoesRight) {
       throwEmoji = '🥅';  // Goal for field goals
     } else if ([Phase.KICKOFF_RETURN, Phase.PUNT_RETURN].includes(gameState.phase)) {
       throwEmoji = '🏃';  // Runner for returns
+    } else if (isDefenseShot) {
+      throwEmoji = '🛡️';  // Shield for defensive incomplete response
     } else {
       throwEmoji = '💪';  // Arm for passes
     }
@@ -1292,6 +1320,24 @@ const controlRenderers = {
     );
   },
 
+  [Phase.INCOMPLETE_DEFENSE_SHOT]: () => {
+    const defenseTeamObj = getTeam(-gameState.offenseTeam);
+    const row1 =
+      Button.success('+1', 'defense-incomplete-shot', { result: '1' }) +
+      Button.neutral('0', 'defense-incomplete-shot', { result: '0' }) +
+      Button.warning('-1', 'defense-incomplete-shot', { result: '-1' }) +
+      Button.warning('-2', 'defense-incomplete-shot', { result: '-2' }) +
+      Button.warning('-3', 'defense-incomplete-shot', { result: '-3' }) +
+      Button.danger('Sack fumble (-3)', 'defense-incomplete-shot', { result: 'fumble' });
+    const row2 =
+      Button.neutral('Missed (0)', 'defense-incomplete-shot', { result: 'miss' });
+    return controlSection(
+      `${defenseTeamObj.name} - incomplete response (1 attempt)`,
+      -gameState.offenseTeam,
+      row1, row2
+    );
+  },
+
   [Phase.PUNT]: () => gridSection(
     `${offenseTeam().name} - punting (first of 2)`,
     gameState.offenseTeam,
@@ -1392,6 +1438,7 @@ const actionHandlers = {
   'qb-sneak': () => handleSelectPlayers(1, true),
   'start-throw': handleStartThrow,
   'throw-result': e => handleThrowResultSimple(e.target.dataset.result),
+  'defense-incomplete-shot': e => handleDefenseIncompleteShot(e.target.dataset.result),
   'result': e => handlePlayResult(parseInt(e.target.dataset.cups)),
   'offsides': e => handleOffsides(parseInt(e.target.dataset.dir)),
   'fourth-down': e => handleFourthDown(e.target.dataset.choice),
@@ -1604,9 +1651,8 @@ function handleThrowResultSimple(result) {
   }
 
   if (result === 'incomplete') {
-    setPlayResult(team, Phase.THROW_PLAY, beginPos, beginPos, { outcome: 'incomplete' });
-    gameState.down++;
-    checkDowns();
+    // Transition to defense shot phase
+    enterPhase(Phase.INCOMPLETE_DEFENSE_SHOT, { incompleteFrom: beginPos });
     return;
   }
 
@@ -1630,6 +1676,36 @@ function handleThrowResultSimple(result) {
 
   gameState.ballPosition = FieldPosition.clampToField(endPos);
   setPlayResult(team, Phase.THROW_PLAY, beginPos, gameState.ballPosition);
+  checkFirstDownAndAdvance();
+}
+
+// Handle defensive incomplete response shot
+function handleDefenseIncompleteShot(result) {
+  const team = gameState.offenseTeam;
+  const beginPos = gameState.ballPosition;
+
+  if (result === 'fumble') {
+    const endPos = beginPos + -3 * team;
+    setPlayResult(team, Phase.INCOMPLETE_DEFENSE_SHOT, beginPos, FieldPosition.clampToField(endPos), { outcome: 'turnover', turnoverReason: 'fumble' });
+    gameState.ballPosition = endPos;
+    handleTurnover({ checkDefensiveScoring: true });
+    return;
+  }
+
+  const yards = result === 'miss' ? 0 : parseInt(result);
+  const scoringResult = advanceBall(yards);
+
+  if (scoringResult === 'td') {
+    setPlayResult(team, Phase.INCOMPLETE_DEFENSE_SHOT, beginPos, gameState.ballPosition, { outcome: 'td' });
+    return;
+  }
+
+  if (scoringResult === 'safety') {
+    setPlayResult(team, Phase.INCOMPLETE_DEFENSE_SHOT, beginPos, gameState.ballPosition, { outcome: 'safety' });
+    return;
+  }
+
+  setPlayResult(team, Phase.INCOMPLETE_DEFENSE_SHOT, beginPos, gameState.ballPosition, { outcome: 'incomplete' });
   checkFirstDownAndAdvance();
 }
 
