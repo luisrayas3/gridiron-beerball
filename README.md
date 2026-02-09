@@ -84,7 +84,7 @@ On any down, the offense can choose from:
 
 ### Overtime
 
-If the score is tied after 4 quarters, each team gets 1 possession starting at the 50 yard line. If still tied, teams alternate field goal attempts from the 50 yard line until one makes and the other misses.
+If the score is tied after 4 quarters, each team gets 1 possession starting at the 50 yard line. If still tied, teams alternate single-attempt field goals from the 50 yard line (1 throw each, no blocking) until one makes and the other misses.
 
 ## Play mechanics
 

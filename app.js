@@ -1,4 +1,4 @@
-// Gridiron Beerball - Game Tracker
+// Gridiron beerball
 
 const STORAGE_KEY = 'gridiron-beerball-game';
 const STORAGE_VERSION = 3;  // Increment when state structure changes
@@ -6,6 +6,17 @@ const CUPS_TO_FIRST_DOWN = 3;
 const POSSESSIONS_PER_QUARTER = 4;
 const TOTAL_QUARTERS = 4;
 const BASE_KICK_DISTANCE = 10;  // Base punt/kick distance per rules
+const SACK_FUMBLE_YARDS = 3;    // Yards lost on sack fumble
+const HISTORY_LIMIT = 30;       // Max undo states to keep
+const TD_YARDS = 20;            // Guaranteed TD from any position (field is -9 to 9)
+
+// Down resolution modes for resolvePlay
+const DownMode = {
+  NORMAL: 0,    // Increment down, check first down, turnover on downs
+  FRESH: 1,     // Fresh set of downs (returns, recoveries)
+  REPLAY: 2,    // Replay the down (offsides)
+  TURNOVER: 3   // Flip possession, then fresh downs
+};
 
 // Field position abstraction - encapsulates all position logic
 const FieldPosition = {
@@ -53,12 +64,12 @@ const FLIP_CUP_YARDAGE = [0, 1, 2, 5, 9, 'TD']; // index = unflipped cups
 // Game phases
 const Phase = {
   COIN_TOSS: 'coin_toss',
+  KICKOFF_CHOICE: 'kickoff_choice',
   KICKOFF: 'kickoff',
-  KICKOFF_KICK: 'kickoff_kick',
   ONSIDE_KICK: 'onside_kick',
   KICKOFF_RETURN: 'kickoff_return',
   NORMAL_PLAY: 'normal_play',
-  PLAY_RESULT: 'play_result',
+  RUN_PLAY: 'run_play',
   THROW_PLAY: 'throw_play',
   PUNT: 'punt',
   PUNT_RETURN: 'punt_return',
@@ -70,6 +81,11 @@ const Phase = {
   OVERTIME_START: 'overtime_start',
   OVERTIME_FIELD_GOAL: 'overtime_field_goal',
   INCOMPLETE_DEFENSE_SHOT: 'incomplete_defense_shot'
+};
+
+const KICK_TO_RETURN_PHASE = {
+  [Phase.KICKOFF]: Phase.KICKOFF_RETURN,
+  [Phase.PUNT]: Phase.PUNT_RETURN
 };
 
 // Throwing zones (relative positions from offense perspective)
@@ -89,6 +105,585 @@ const THROW_ZONES = {
   DEEP_START: 7,      // opponent's 15 yard line, gain 6
   DEEP_END: 9         // opponent's 5 yard line, TD
 };
+
+// Effect types for unified cup/button styling
+const EffectType = {
+  GAIN: 'gain',
+  LOSS: 'loss',
+  NEUTRAL: 'neutral',
+  TURNOVER: 'turnover'
+};
+
+// Maps effect type to CSS classes for effect row and buttons
+const EFFECT_STYLING = {
+  [EffectType.GAIN]:     { effectClass: 'effect-gain',     btnVariant: 'success' },
+  [EffectType.LOSS]:     { effectClass: 'effect-loss',     btnVariant: 'warning' },
+  [EffectType.NEUTRAL]:  { effectClass: 'effect-neutral',  btnVariant: 'neutral' },
+  [EffectType.TURNOVER]: { effectClass: 'effect-turnover', btnVariant: 'danger' }
+};
+
+// ============ EFFECT CALCULATOR SYSTEM ============
+
+// Helper: Kick/punt effect (KICKOFF_KICK, PUNT)
+function calcKickEffect(cup, team) {
+  const total = BASE_KICK_DISTANCE + (cup * team + 1);
+  const type = total > BASE_KICK_DISTANCE ? EffectType.GAIN
+             : total === BASE_KICK_DISTANCE ? EffectType.NEUTRAL
+             : EffectType.LOSS;
+  return { type, text: `+${total}`, value: total };
+}
+
+// Helper: Return effect (KICKOFF_RETURN, PUNT_RETURN)
+function calcReturnEffect(cup, landing, team) {
+  const inEndzone = FieldPosition.isInEndzone(landing);
+  const modifier = cup * team + 1;
+  const finalPos = landing + modifier * team;
+  const clampedFinal = FieldPosition.clampToField(finalPos);
+  const isTD = FieldPosition.isTouchdown(finalPos, team);
+  const isRecovery = FieldPosition.isSafety(finalPos, team) && (inEndzone || modifier <= 0);
+
+  if (isTD) return { type: EffectType.GAIN, text: 'TD', isTD: true };
+  if (isRecovery) return { type: EffectType.TURNOVER, text: 'REC', isRecovery: true };
+  if (inEndzone) {
+    const effectivePos = (clampedFinal + team * FieldPosition.FIELD_MAX) * team + 1;
+    return {
+      type: effectivePos > 1 ? EffectType.GAIN : EffectType.NEUTRAL,
+      text: `+${effectivePos}`,
+      value: effectivePos
+    };
+  }
+  if (modifier >= 1) return { type: EffectType.GAIN, text: `+${modifier}`, value: modifier };
+  if (modifier === 0) return { type: EffectType.NEUTRAL, text: '0', value: 0 };
+  return { type: EffectType.LOSS, text: String(modifier), value: modifier };
+}
+
+// Helper: Throw effect (THROW_PLAY)
+function calcThrowEffect(cup, team) {
+  const relPos = cup * team;
+
+  if (relPos >= THROW_ZONES.SACK_FUMBLE_START && relPos <= THROW_ZONES.SACK_FUMBLE_END) {
+    return { type: EffectType.TURNOVER, text: 'FUM' };
+  }
+  if (relPos >= THROW_ZONES.MIDDLE_START && relPos <= -1) {
+    const yards = relPos + 1;
+    return {
+      type: yards < 0 ? EffectType.LOSS : EffectType.NEUTRAL,
+      text: yards < 0 ? String(yards) : '0',
+      value: yards
+    };
+  }
+  if (relPos >= 0 && relPos <= THROW_ZONES.MIDDLE_END) {
+    return { type: EffectType.GAIN, text: `+${relPos + 1}`, value: relPos + 1 };
+  }
+  if (relPos === THROW_ZONES.INCOMPLETE_30 || relPos === THROW_ZONES.INCOMPLETE_20) {
+    return { type: EffectType.NEUTRAL, text: '0' };
+  }
+  if (relPos === THROW_ZONES.INTERCEPTION) {
+    return { type: EffectType.TURNOVER, text: 'INT' };
+  }
+  if (relPos >= THROW_ZONES.DEEP_START && relPos <= THROW_ZONES.DEEP_END) {
+    return { type: EffectType.GAIN, text: '5+' };
+  }
+  return null;
+}
+
+// Helper: Field goal effect (FIELD_GOAL_ATTEMPT, OVERTIME_FIELD_GOAL)
+function calcFieldGoalEffect(cup, ballPos, team, missType = EffectType.TURNOVER) {
+  const isValid = cup * team <= ballPos * team;
+  return { type: isValid ? EffectType.GAIN : missType, text: isValid ? 'FG' : '0' };
+}
+
+// Helper: Onside kick effect (ONSIDE_KICK)
+function calcOnsideEffect(cup, team) {
+  const validPositions = [-team * 3, -team * 2, -team * 1];
+  if (validPositions.includes(cup)) {
+    const cups = cup === -team * 3 ? 2 : cup === -team * 2 ? 3 : 4;
+    return { type: EffectType.GAIN, text: `+${cups}`, value: cups };
+  }
+  return { type: EffectType.LOSS, text: '+2', value: 2 };
+}
+
+// Helper: Defense incomplete shot effect (INCOMPLETE_DEFENSE_SHOT)
+function calcDefenseShotEffect(cup, team) {
+  const relPos = cup * (-team);  // From defense's perspective
+
+  if (relPos <= 0) return { type: EffectType.GAIN, text: '+1', value: 1 };
+  if (relPos === 1) return { type: EffectType.NEUTRAL, text: '0', value: 0 };
+  if (relPos >= 2 && relPos <= 4) {
+    const yards = -(relPos - 1);
+    return { type: EffectType.LOSS, text: String(yards), value: yards };
+  }
+  return { type: EffectType.TURNOVER, text: 'FUM' };
+}
+
+// Unified cup effect calculator - single switch over phases
+function calculateCupEffect(phase, cup, context) {
+  const { team, ballPosition, phaseData } = context;
+
+  switch (phase) {
+    case Phase.KICKOFF:
+    case Phase.PUNT:
+      return calcKickEffect(cup, team);
+
+    case Phase.KICKOFF_RETURN:
+    case Phase.PUNT_RETURN:
+      return calcReturnEffect(cup, phaseData?.landing, team);
+
+    case Phase.THROW_PLAY:
+      return calcThrowEffect(cup, team);
+
+    case Phase.FIELD_GOAL_ATTEMPT:
+      return calcFieldGoalEffect(cup, ballPosition, team);
+
+    case Phase.OVERTIME_FIELD_GOAL:
+      return calcFieldGoalEffect(cup, ballPosition, team, EffectType.NEUTRAL);
+
+    case Phase.EXTRA_POINT:
+      return { type: EffectType.GAIN, text: '1PT' };
+
+    case Phase.ONSIDE_KICK:
+      return calcOnsideEffect(cup, team);
+
+    case Phase.INCOMPLETE_DEFENSE_SHOT:
+      return calcDefenseShotEffect(cup, team);
+
+    default:
+      return null;
+  }
+}
+
+// ============ STATE MACHINE ============
+
+// Setup helpers: state preparation + transition for common resolution points
+
+function setupKickoff(allowOnside, onsideOnly = false) {
+  gameState.ballPosition = -gameState.offenseTeam * FieldPosition.YARD_25;
+  return { nextPhase: Phase.KICKOFF_CHOICE, phaseData: { allowOnside, onsideOnly } };
+}
+
+function setupPostScore() {
+  if (gameState.overtime) return setupOvertimeDrive();
+  const isHalfEnd = gameState.quarter % 2 === 0;
+  const outOfPossessions = isHalfEnd && gameState.possession >= POSSESSIONS_PER_QUARTER;
+  return setupKickoff(true, outOfPossessions);
+}
+
+// Unified play resolution - single entry point for all ball movement
+// Handles TDs, safeties, turnovers, first downs, and down counting
+function resolvePlay(yards, mode, playDetail = {}) {
+  const beginPos = gameState.ballPosition;
+  const originalTeam = gameState.offenseTeam;
+  const phase = gameState.phase;
+  const endPos = beginPos + yards * originalTeam;
+
+  gameState.ballPosition = FieldPosition.clampToField(endPos);
+
+  const isTurnover = mode === DownMode.TURNOVER;
+
+  // Switch team early on turnover - unifies TD check
+  if (isTurnover) {
+    gameState.offenseTeam = -originalTeam;
+  }
+
+  const currentTeam = gameState.offenseTeam;
+
+  // TD - unified check works for both offense and defensive TD
+  if (FieldPosition.isTouchdown(endPos, currentTeam)) {
+    setPlayResult(currentTeam, phase, beginPos, gameState.ballPosition, { ...playDetail, outcome: 'td' });
+    addScore(currentTeam, 6);
+    gameState.ballPosition = currentTeam * (FieldPosition.FIELD_MAX + 1);
+    return { nextPhase: Phase.TOUCHDOWN_CONVERSION };
+  }
+
+  // Safety - only possible on non-turnovers (can't fumble into own endzone)
+  if (!isTurnover && FieldPosition.isSafety(endPos, currentTeam)) {
+    setPlayResult(currentTeam, phase, beginPos, gameState.ballPosition, { ...playDetail, outcome: 'safety' });
+    addScore(-currentTeam, 2);
+    return setupPostScore();
+  }
+
+  // Non-TD turnover - attribute play to original team, advance clock, fresh downs
+  if (isTurnover) {
+    setPlayResult(originalTeam, phase, beginPos, gameState.ballPosition, { outcome: 'turnover', ...playDetail });
+    return advanceGameClock();
+  }
+
+  // Normal play result
+  setPlayResult(currentTeam, phase, beginPos, gameState.ballPosition, playDetail);
+
+  if (mode === DownMode.REPLAY) return { nextPhase: Phase.NORMAL_PLAY };
+  if (mode === DownMode.FRESH) return setupFreshDowns();
+
+  // DownMode.NORMAL: first down check, increment down, turnover on downs
+  const madeFirstDown = gameState.ballPosition * currentTeam >= gameState.firstDownMarker * currentTeam;
+  if (madeFirstDown) return setupFreshDowns();
+  gameState.down++;
+  if (gameState.down > 4) {
+    gameState.offenseTeam = -currentTeam;  // Turnover on downs
+    return advanceGameClock();
+  }
+  return { nextPhase: Phase.NORMAL_PLAY };
+}
+
+// Main state machine: returns { nextPhase, phaseData } or null if already handled
+function computeTransition(action, data) {
+  const phase = gameState.phase;
+  const key = `${phase}:${action}`;
+
+  switch (key) {
+    // ---- COIN TOSS ----
+    case `${Phase.COIN_TOSS}:coin-toss`: {
+      const team = parseInt(data.team, 10);
+      gameState.offenseTeam = -team;
+      gameState.openingKickoffReceiver = team;
+      setPlayResult(team, 'coin_toss', 0, 0);
+      // Set ball at kicking team's 25
+      gameState.ballPosition = -gameState.offenseTeam * FieldPosition.YARD_25;
+      return { nextPhase: Phase.KICKOFF_CHOICE, phaseData: { allowOnside: false } };
+    }
+
+    // ---- KICKOFF CHOICE ----
+    case `${Phase.KICKOFF_CHOICE}:regular-kickoff`:
+      return { nextPhase: Phase.KICKOFF };
+
+    case `${Phase.KICKOFF_CHOICE}:onside-kick`:
+      return { nextPhase: Phase.ONSIDE_KICK };
+
+    case `${Phase.KICKOFF_CHOICE}:skip-kickoff`:
+      return computeSkipKickoffTransition();
+
+    // ---- KICKOFF KICK ----
+    case `${Phase.KICKOFF}:kick-land`:
+      return computeKickTransition(parseInt(data.cup, 10));
+
+    case `${Phase.KICKOFF}:kick-miss`:
+      return computeKickTransition(null);
+
+    // ---- KICKOFF RETURN ----
+    case `${Phase.KICKOFF_RETURN}:return-result`:
+      return computeReturnTransition(parseInt(data.cup, 10));
+
+    case `${Phase.KICKOFF_RETURN}:return-miss`:
+      return computeReturnMissTransition();
+
+    // ---- ONSIDE KICK ----
+    case `${Phase.ONSIDE_KICK}:onside-recovery`:
+      return computeOnsideRecoveryTransition(parseInt(data.pos, 10));
+
+    case `${Phase.ONSIDE_KICK}:onside-miss`:
+      return computeOnsideMissTransition();
+
+    // ---- NORMAL PLAY ----
+    case `${Phase.NORMAL_PLAY}:run`: {
+      const count = parseInt(data.count, 10);
+      return { nextPhase: Phase.RUN_PLAY, phaseData: { offensePlayers: count, isQBSneak: count === 1 } };
+    }
+
+    case `${Phase.NORMAL_PLAY}:pass`:
+      return { nextPhase: Phase.THROW_PLAY };
+
+    case `${Phase.NORMAL_PLAY}:punt`:
+      return { nextPhase: Phase.PUNT };
+
+    case `${Phase.NORMAL_PLAY}:field-goal`:
+      return { nextPhase: Phase.FIELD_GOAL_ATTEMPT };
+
+    // ---- RUN PLAY ----
+    case `${Phase.RUN_PLAY}:result`:
+      return computeRunResultTransition(parseInt(data.cups, 10));
+
+    case `${Phase.RUN_PLAY}:offsides`:
+      return computeOffsidesTransition(parseInt(data.dir, 10));
+
+    // ---- THROW PLAY ----
+    case `${Phase.THROW_PLAY}:throw-result`:
+      return computeThrowResultTransition(data.result);
+
+    // ---- INCOMPLETE DEFENSE SHOT ----
+    case `${Phase.INCOMPLETE_DEFENSE_SHOT}:defense-incomplete-shot`:
+      return computeDefenseShotTransition(data.result);
+
+    // ---- PUNT ----
+    case `${Phase.PUNT}:kick-land`:
+      return computeKickTransition(parseInt(data.cup, 10));
+
+    case `${Phase.PUNT}:kick-miss`:
+      return computeKickTransition(null);
+
+    // ---- PUNT RETURN ----
+    case `${Phase.PUNT_RETURN}:return-result`:
+      return computeReturnTransition(parseInt(data.cup, 10));
+
+    case `${Phase.PUNT_RETURN}:return-miss`:
+      return computeReturnMissTransition();
+
+    // ---- FIELD GOAL ----
+    case `${Phase.FIELD_GOAL_ATTEMPT}:fg-result`:
+      return computeFieldGoalTransition(data.result);
+
+    // ---- TOUCHDOWN CONVERSION ----
+    case `${Phase.TOUCHDOWN_CONVERSION}:conversion-choice`:
+      return computeConversionChoiceTransition(data.choice);
+
+    // ---- EXTRA POINT ----
+    case `${Phase.EXTRA_POINT}:fg-result`:
+      return computeExtraPointTransition(data.result);
+
+    // ---- TWO POINT CONVERSION ----
+    case `${Phase.TWO_POINT_CONVERSION}:two-point`:
+      return computeTwoPointTransition(parseInt(data.cups, 10));
+
+    // ---- OVERTIME ----
+    case `${Phase.OVERTIME_START}:ot-first`:
+      return computeOTFirstTransition(parseInt(data.team, 10));
+
+    case `${Phase.OVERTIME_FIELD_GOAL}:fg-result`:
+      return computeOTFieldGoalTransition(data.result);
+
+    // ---- GAME OVER ----
+    case `${Phase.GAME_OVER}:new-game`:
+      return { nextPhase: null };  // Special: triggers new game setup
+
+    default:
+      console.error(`Invalid action ${action} in phase ${phase}`);
+      return null;
+  }
+}
+
+// ---- Transition helpers ----
+
+function computeSkipKickoffTransition() {
+  if (gameState.quarter >= TOTAL_QUARTERS) {
+    if (gameState.team1.score === gameState.team2.score) {
+      gameState.overtime = { firstOffense: null, fgShootout: null };
+      return { nextPhase: Phase.OVERTIME_START };
+    }
+    return { nextPhase: Phase.GAME_OVER };
+  }
+  gameState.quarter++;
+  if (gameState.quarter === 3) {
+    gameState.possession = 0;
+    gameState.offenseTeam = gameState.openingKickoffReceiver;
+    return setupKickoff(false);
+  }
+  gameState.possession = 1;
+  return setupFreshDowns();
+}
+
+function computeKickTransition(cup) {
+  const team = gameState.offenseTeam;
+  const beginPos = gameState.ballPosition;
+  const modifier = cup != null ? (cup * team + 1) : 0;
+  const landingPos = beginPos + (BASE_KICK_DISTANCE + modifier) * team;
+
+  setPlayResult(team, gameState.phase, beginPos, landingPos);
+  gameState.offenseTeam = -team;
+  // ballPosition reflects clamped landing (never past endzone)
+  // landing tracks raw value for return calculations
+  gameState.ballPosition = FieldPosition.clampToEndzone(landingPos);
+  gameState.phaseData = { landing: landingPos };
+  return advanceGameClock();
+}
+
+function computeReturnTransition(cup) {
+  const team = gameState.offenseTeam;
+  const landing = gameState.phaseData.landing;
+  const modifier = cup * team + 1;
+  const finalPos = landing + modifier * team;
+
+  // Calculate net yards from clamped ballPosition to final position
+  const netYards = (finalPos - gameState.ballPosition) / team;
+
+  // Recovery: ball ends in own endzone
+  if (FieldPosition.isSafety(finalPos, team)) {
+    const targetPos = -team * FieldPosition.YARD_5;
+    const recoveryYards = (targetPos - gameState.ballPosition) / team;
+    return resolvePlay(recoveryYards, DownMode.TURNOVER, { outcome: 'recovery' });
+  }
+
+  return resolvePlay(netYards, DownMode.FRESH);
+}
+
+function computeReturnMissTransition() {
+  const team = gameState.offenseTeam;
+
+  // Touchback: if in endzone (ballPosition at goal line), push to 5 yard line
+  if (FieldPosition.isInEndzone(gameState.ballPosition)) {
+    const targetPos = -team * FieldPosition.YARD_5;
+    const touchbackYards = (targetPos - gameState.ballPosition) / team;
+    return resolvePlay(touchbackYards, DownMode.FRESH);
+  }
+
+  return resolvePlay(0, DownMode.FRESH);
+}
+
+function computeOnsideRecoveryTransition(position) {
+  const team = gameState.offenseTeam;
+  const yards = (position - gameState.ballPosition) / team;
+  return resolvePlay(yards, DownMode.FRESH, { outcome: 'recovery' });
+}
+
+function computeOnsideMissTransition() {
+  const team = gameState.offenseTeam;
+  const endPos = -team * 3;
+  const yards = (endPos - gameState.ballPosition) / team;
+  return resolvePlay(yards, DownMode.TURNOVER, { outcome: 'missed' });
+}
+
+function computeRunResultTransition(cups) {
+  const { offensePlayers, isQBSneak } = gameState.phaseData;
+  const playDetail = isQBSneak ? null : `${offensePlayers}v${offensePlayers + 1}`;
+
+  // QB sneak: win = +1, tie/loss = 0
+  if (isQBSneak) {
+    return resolvePlay(cups > 0 ? 1 : 0, DownMode.NORMAL, { playDetail });
+  }
+
+  // Tie = 0 yards
+  if (cups === 0) {
+    return resolvePlay(0, DownMode.NORMAL, { playDetail });
+  }
+
+  const isFumble = cups === -offensePlayers;
+  const yardageValue = FLIP_CUP_YARDAGE[Math.abs(cups)];
+
+  // TD by table
+  if (yardageValue === 'TD') {
+    return resolvePlay(TD_YARDS, DownMode.NORMAL, { playDetail });
+  }
+
+  const yards = cups > 0 ? yardageValue : -yardageValue;
+
+  if (isFumble) {
+    return resolvePlay(yards, DownMode.TURNOVER, { turnoverReason: 'fumble', playDetail });
+  }
+
+  return resolvePlay(yards, DownMode.NORMAL, { playDetail });
+}
+
+function computeOffsidesTransition(dir) {
+  return resolvePlay(dir, DownMode.REPLAY, {
+    outcome: 'offsides',
+    offender: dir < 0 ? 'offense' : 'defense'
+  });
+}
+
+function computeThrowResultTransition(result) {
+  if (result === 'td') {
+    return resolvePlay(TD_YARDS, DownMode.NORMAL, { playDetail: 'called' });
+  }
+  if (result === 'int') {
+    return resolvePlay(0, DownMode.TURNOVER, { turnoverReason: 'int' });
+  }
+  if (result === 'sack_fumble') {
+    return resolvePlay(-SACK_FUMBLE_YARDS, DownMode.TURNOVER, { turnoverReason: 'fumble' });
+  }
+  if (result === 'incomplete') {
+    return { nextPhase: Phase.INCOMPLETE_DEFENSE_SHOT, phaseData: { incompleteFrom: gameState.ballPosition } };
+  }
+
+  const yards = parseInt(result, 10);
+  return resolvePlay(yards, DownMode.NORMAL, { playDetail: yards >= 6 ? 'called' : null });
+}
+
+function computeDefenseShotTransition(result) {
+  if (result === 'fumble') {
+    return resolvePlay(-SACK_FUMBLE_YARDS, DownMode.TURNOVER, { turnoverReason: 'fumble' });
+  }
+  const yards = result === 'miss' ? 0 : parseInt(result, 10);
+  return resolvePlay(yards, DownMode.NORMAL, { outcome: 'incomplete' });
+}
+
+function computeFieldGoalTransition(result) {
+  const team = gameState.offenseTeam;
+  const pos = gameState.ballPosition;
+
+  if (result === 'make') {
+    setPlayResult(team, Phase.FIELD_GOAL_ATTEMPT, pos, pos, { outcome: 'made', points: 3 });
+    addScore(team, 3);
+    return setupPostScore();
+  }
+  setPlayResult(team, Phase.FIELD_GOAL_ATTEMPT, pos, pos, { outcome: 'missed' });
+  gameState.offenseTeam = -team;
+  return advanceGameClock();
+}
+
+function computeConversionChoiceTransition(choice) {
+  const team = gameState.offenseTeam;
+  const pos = team * FieldPosition.YARD_5;
+  gameState.ballPosition = pos;
+  setPlayResult(team, 'conversion_choice', pos, pos, { playDetail: choice === 'xp' ? 'extra point' : '2 point' });
+  if (choice === 'xp') return { nextPhase: Phase.EXTRA_POINT };
+  return { nextPhase: Phase.TWO_POINT_CONVERSION, phaseData: { offensePlayers: 1, isQBSneak: true } };
+}
+
+function computeExtraPointTransition(result) {
+  const team = gameState.offenseTeam;
+  const pos = gameState.ballPosition;
+  if (result === 'make') {
+    setPlayResult(team, Phase.EXTRA_POINT, pos, pos, { outcome: 'made', points: 1 });
+    addScore(team, 1);
+  } else {
+    setPlayResult(team, Phase.EXTRA_POINT, pos, pos, { outcome: 'missed' });
+  }
+  return setupPostScore();
+}
+
+function computeTwoPointTransition(cups) {
+  const team = gameState.offenseTeam;
+  const pos = gameState.ballPosition;
+  if (cups === 1) {
+    setPlayResult(team, Phase.TWO_POINT_CONVERSION, pos, pos, { outcome: 'made', points: 2 });
+    addScore(team, 2);
+  } else {
+    setPlayResult(team, Phase.TWO_POINT_CONVERSION, pos, pos, { outcome: 'missed' });
+  }
+  return setupPostScore();
+}
+
+function computeOTFirstTransition(team) {
+  gameState.offenseTeam = team;
+  gameState.overtime.firstOffense = team;
+  gameState.possession = 1;
+  gameState.ballPosition = 0;
+  setPlayResult(team, 'ot_first', 0, 0);
+  return setupFreshDowns();
+}
+
+function computeOTFieldGoalTransition(result) {
+  const team = gameState.offenseTeam;
+  const otherTeam = -team;
+  const pos = gameState.ballPosition;
+  const fg = gameState.overtime.fgShootout;
+
+  const made = result === 'make';
+  if (made) {
+    setPlayResult(team, Phase.OVERTIME_FIELD_GOAL, pos, pos, { outcome: 'made', points: 3 });
+    addScore(team, 3);
+  } else {
+    setPlayResult(team, Phase.OVERTIME_FIELD_GOAL, pos, pos, { outcome: 'missed' });
+  }
+
+  // First shot of the round - other team gets rebuttal
+  if (fg.firstResult === null) {
+    fg.firstResult = made;
+    fg.firstTeam = team;
+    gameState.offenseTeam = otherTeam;
+    return { nextPhase: Phase.OVERTIME_FIELD_GOAL };
+  }
+
+  // Rebuttal shot - compare results
+  if (made !== fg.firstResult) {
+    // Different results - whoever made wins
+    return { nextPhase: Phase.GAME_OVER };
+  }
+
+  // Same result - reset for next round
+  fg.firstResult = null;
+  fg.round++;
+  gameState.offenseTeam = fg.firstTeam;
+  return { nextPhase: Phase.OVERTIME_FIELD_GOAL };
+}
 
 // Default game state
 // Teams are 1 (goes right/positive) or -1 (goes left/negative)
@@ -120,7 +715,7 @@ function createInitialState(team1Name, team1Color, team2Name, team2Color) {
     lastPlayResult: { team: 1, playType: 'game_start', beginPosition: 0, endPosition: 0 },
     openingKickoffReceiver: null,
     history: [],
-    overtime: null         // { round, firstOffense, firstTeamDone, fgShootout: { firstTeam, firstMade, firstMissed } }
+    overtime: null         // { firstOffense, fgShootout: { firstTeam, firstResult, round } } - uses gameState.possession for OT possession tracking
   };
 }
 
@@ -136,53 +731,6 @@ function getTeam(teamId) {
 // Get current offense team object
 function offenseTeam() {
   return getTeam(gameState.offenseTeam);
-}
-
-// Check if current ball position results in TD or safety, and handle it
-// Returns: 'td', 'safety', or null (play continues normally)
-// Clamps position and triggers scoring if applicable
-function checkScoring() {
-  const team = gameState.offenseTeam;
-
-  // Touchdown: past opponent's endzone
-  if (FieldPosition.isTouchdown(gameState.ballPosition, team)) {
-    gameState.ballPosition = FieldPosition.clampToField(gameState.ballPosition);
-    scoreTouchdown();
-    return 'td';
-  }
-
-  // Safety: pushed back past own endzone
-  if (FieldPosition.isSafety(gameState.ballPosition, team)) {
-    gameState.ballPosition = FieldPosition.clampToField(gameState.ballPosition);
-    scoreSafety();
-    return 'safety';
-  }
-
-  return null;
-}
-
-// Move ball by yards in offense's direction, then check for TD/safety
-// Returns: 'td', 'safety', or null (normal play continues)
-function advanceBall(yards) {
-  gameState.ballPosition += yards * gameState.offenseTeam;
-  return checkScoring();
-}
-
-// Handle any turnover: fumble, interception, downs
-// Flips possession, optionally checks for defensive scoring, advances clock
-function handleTurnover(opts = {}) {
-  const { checkDefensiveScoring = false, advanceClock = true } = opts;
-
-  gameState.offenseTeam = -gameState.offenseTeam;
-
-  if (checkDefensiveScoring && checkScoring()) {
-    // Defensive TD - counts as possession for recovering team
-    gameState.possession++;
-    return;
-  }
-
-  if (advanceClock && advanceGameClock()) return;
-  startNewPossession();
 }
 
 // Get display label for a cup (yard lines)
@@ -203,7 +751,7 @@ function cupToLabel(cup) {
   return `${abbrev} ${cupDisplayLabel(cup)}`;
 }
 
-// ============ Button Factory ============
+// ============ Button factory ============
 
 const Button = {
   create(text, action, data = {}, options = {}) {
@@ -262,27 +810,18 @@ function gridSection(headerText, headerTeam, gridHtml, missLabel = null, missAct
   return `<div class="control-section">${controlSectionHeader(headerText, headerTeam)}<div class="button-row">${gridHtml}</div>${missRow}</div>`;
 }
 
-// ============ Grid Renderers ============
+// ============ Grid renderers ============
 
 // Render a grid of cup selection buttons for kicks/punts
-function renderCupSelectGrid(action) {
+function renderCupSelectGrid(action, phase) {
+  const context = { team: gameState.offenseTeam, ballPosition: gameState.ballPosition, phaseData: gameState.phaseData };
   const buttons = [];
   for (let cup = FieldPosition.FIELD_MIN; cup <= FieldPosition.FIELD_MAX; cup++) {
-    let btnClass = 'btn btn-compact';
-    // Modifier = cup * team + 1 (range -8 to +10)
-    const modifier = cup * gameState.offenseTeam + 1;
-    // Total ball movement = base + modifier (range: +2 to +20)
-    const totalMovement = BASE_KICK_DISTANCE + modifier;
-
-    if (totalMovement > BASE_KICK_DISTANCE) {
-      btnClass += ' btn-success';
-    } else if (totalMovement === BASE_KICK_DISTANCE) {
-      btnClass += ' btn-neutral';
-    } else {
-      btnClass += ' btn-warning';
-    }
-    const label = `+${totalMovement}`;
-    buttons.push(`<button class="${btnClass}" data-action="${action}" data-cup="${cup}">${label}</button>`);
+    const effect = calculateCupEffect(phase, cup, context);
+    if (!effect) continue;
+    const styling = EFFECT_STYLING[effect.type];
+    const btnClass = `btn btn-compact btn-${styling.btnVariant}`;
+    buttons.push(`<button class="${btnClass}" data-action="${action}" data-cup="${cup}">${effect.text}</button>`);
   }
   return buttons.join('');
 }
@@ -307,103 +846,47 @@ function renderOnsideRecoveryGrid() {
 }
 
 // Shared helper for rendering return grids (kickoff and punt returns)
-// landingPosition: where the kick/punt landed
-// returnerTeam: team ID of the returner (1 or -1)
-// action: the data-action attribute for buttons
+// Uses calcReturnEffect for unified effect calculation
 function renderReturnGrid(action, landingPosition, returnerTeam) {
   const buttons = [];
-  let hasRecovery = false;
-  let recoveryCup = null;
-  let hasTD = false;
-  let tdCup = null;
+  let hasRecovery = false, recoveryCup = null;
+  let hasTD = false, tdCup = null;
 
-  // Calculate missed result (where ball ends up if return is missed)
-  const missedPosition = FieldPosition.clampToField(landingPosition);
-
-  // Generate buttons for all cups in field order (left to right: -9 to +9)
   for (let cup = FieldPosition.FIELD_MIN; cup <= FieldPosition.FIELD_MAX; cup++) {
-    // Return modifier = cups gained toward scoring endzone (positive = good)
-    const returnModifier = cup * returnerTeam + 1;
+    const effect = calcReturnEffect(cup, landingPosition, returnerTeam);
 
-    // Calculate final position: landing + modifier in returner's direction
-    const finalPosition = landingPosition + returnModifier * returnerTeam;
-    const clampedFinal = FieldPosition.clampToField(finalPosition);
-    const isTD = FieldPosition.isTouchdown(finalPosition, returnerTeam);
-    const inEndzone = FieldPosition.isInEndzone(landingPosition);
-    const finalInOwnEndzone = FieldPosition.isSafety(finalPosition, returnerTeam);
-    const isRecovery = finalInOwnEndzone && (inEndzone || returnModifier <= 0);
-
-    let btnClass = 'btn btn-compact';
-    let label;
-
-    if (isTD) {
-      // Track TD but don't add button yet - will add consolidated button
-      if (!hasTD) {
-        hasTD = true;
-        tdCup = cup;
-      }
-      continue; // Skip individual TD buttons
-    } else if (isRecovery) {
-      // Track recovery but don't add button yet - will add consolidated button
-      if (!hasRecovery) {
-        hasRecovery = true;
-        recoveryCup = cup;
-      }
-      continue; // Skip individual recovery buttons
-    } else if (inEndzone) {
-      // Ball in endzone - show effective position from touchback
-      const effectivePos = (clampedFinal + returnerTeam * FieldPosition.FIELD_MAX) * returnerTeam + 1;
-      // +1 is neutral (matches "Missed +1"), higher is success
-      btnClass += effectivePos > 1 ? ' btn-success' : ' btn-neutral';
-      label = `+${effectivePos}`;
-    } else if (returnModifier >= 1) {
-      btnClass += ' btn-success';
-      label = `+${returnModifier}`;
-    } else if (returnModifier === 0) {
-      btnClass += ' btn-neutral';
-      label = '0';
-    } else {
-      btnClass += ' btn-warning';
-      label = returnModifier.toString();
+    if (effect.isTD) {
+      if (!hasTD) { hasTD = true; tdCup = cup; }
+      continue;  // Consolidate TD buttons
+    }
+    if (effect.isRecovery) {
+      if (!hasRecovery) { hasRecovery = true; recoveryCup = cup; }
+      continue;  // Consolidate recovery buttons
     }
 
-    buttons.push(`<button class="${btnClass}" data-action="${action}" data-cup="${cup}">${label}</button>`);
+    const styling = EFFECT_STYLING[effect.type];
+    const btnClass = `btn btn-compact btn-${styling.btnVariant}`;
+    buttons.push(`<button class="${btnClass}" data-action="${action}" data-cup="${cup}">${effect.text}</button>`);
   }
 
-  // Add consolidated buttons at appropriate edges
+  // Add consolidated TD/Recovery buttons at appropriate edges
   // Team 1 (attacks right): Recovery on left, TD on right
   // Team -1 (attacks left): TD on left, Recovery on right
   if (returnerTeam > 0) {
-    if (hasRecovery) {
-      buttons.unshift(`<button class="btn btn-danger" data-action="${action}" data-cup="${recoveryCup}">Recovery</button>`);
-    }
-    if (hasTD) {
-      buttons.push(`<button class="btn btn-success" data-action="${action}" data-cup="${tdCup}">Touchdown</button>`);
-    }
+    if (hasRecovery) buttons.unshift(`<button class="btn btn-danger" data-action="${action}" data-cup="${recoveryCup}">Recovery</button>`);
+    if (hasTD) buttons.push(`<button class="btn btn-success" data-action="${action}" data-cup="${tdCup}">Touchdown</button>`);
   } else {
-    if (hasTD) {
-      buttons.unshift(`<button class="btn btn-success" data-action="${action}" data-cup="${tdCup}">Touchdown</button>`);
-    }
-    if (hasRecovery) {
-      buttons.push(`<button class="btn btn-danger" data-action="${action}" data-cup="${recoveryCup}">Recovery</button>`);
-    }
+    if (hasTD) buttons.unshift(`<button class="btn btn-success" data-action="${action}" data-cup="${tdCup}">Touchdown</button>`);
+    if (hasRecovery) buttons.push(`<button class="btn btn-danger" data-action="${action}" data-cup="${recoveryCup}">Recovery</button>`);
   }
 
   return buttons.join('');
 }
 
-function renderKickoffReturnGrid(action) {
-  return renderReturnGrid(action, gameState.phaseData?.kickLanding, gameState.offenseTeam);
-}
-
-function renderPuntReturnGrid(action) {
-  // Returner is offense (possession flipped when punt landed)
-  return renderReturnGrid(action, gameState.phaseData?.puntLanding, gameState.offenseTeam);
-}
 
 
 
-// ============ DOM Elements ============
+// ============ DOM ============
 
 const elements = {};
 
@@ -458,7 +941,7 @@ function pushHistory() {
   const stateCopy = JSON.parse(JSON.stringify(gameState));
   delete stateCopy.history;
   gameState.history.push(stateCopy);
-  if (gameState.history.length > 20) {
+  if (gameState.history.length > HISTORY_LIMIT) {
     gameState.history.shift();
   }
 }
@@ -514,6 +997,10 @@ function formatLastPlayResult(result) {
 
   switch (result.playType) {
     case Phase.THROW_PLAY: {
+      // Defensive TD on fumble recovery
+      if (result.outcome === 'td' && result.turnoverReason === 'fumble') {
+        return `${teamName} fumble recovery: Touchdown!`;
+      }
       if (result.outcome === 'td') return `${teamName} pass: Touchdown!` + (result.playDetail ? ` (${result.playDetail})` : '');
       if (result.outcome === 'turnover') {
         if (result.turnoverReason === 'int') return `${teamName} pass: Interception`;
@@ -523,14 +1010,25 @@ function formatLastPlayResult(result) {
       return `${teamName} pass: ${yardsStr || 'No gain'}`;
     }
 
-    case Phase.PLAY_RESULT: {
+    case Phase.RUN_PLAY: {
+      // Offsides
+      if (result.outcome === 'offsides' || result.offender) {
+        const who = result.offender === 'offense' ? 'Offense' : 'Defense';
+        if (result.outcome === 'td') return `${who} offsides: Touchdown!`;
+        if (result.outcome === 'safety') return `${who} offsides: Safety!`;
+        return `${who} offsides: ${yards > 0 ? `+${yards}` : yards} yard`;
+      }
+      // Defensive TD on fumble recovery
+      if (result.outcome === 'td' && result.turnoverReason === 'fumble') {
+        return `${teamName} fumble recovery: Touchdown!`;
+      }
       const playName = result.playDetail ? `run ${result.playDetail}` : 'sneak';
       if (result.outcome === 'td') return `${teamName} ${playName}: Touchdown!`;
       if (result.outcome === 'turnover') return `${teamName} ${playName}: Fumble (${yardsStr})`;
       return `${teamName} ${playName}: ${yards !== 0 && yardsStr ? yardsStr : 'No gain'}`;
     }
 
-    case Phase.KICKOFF_KICK:
+    case Phase.KICKOFF:
     case Phase.PUNT:
       return `${teamName} ${result.playType === Phase.PUNT ? 'punt' : 'kickoff'}: ${yardsStr || '0 yards'}`;
 
@@ -569,13 +1067,6 @@ function formatLastPlayResult(result) {
     case Phase.TWO_POINT_CONVERSION:
       return `${teamName} 2 point conversion: ${result.outcome === 'made' ? `Good! (${result.points} pts)` : 'No good'}`;
 
-    case 'offsides': {
-      const who = result.playDetail === 'offense' ? 'Offense' : 'Defense';
-      if (result.outcome === 'td') return `${who} offsides: Touchdown!`;
-      if (result.outcome === 'safety') return `${who} offsides: Safety!`;
-      return `${who} offsides: ${yards > 0 ? `+${yards}` : String(yards)} yard`;
-    }
-
     case 'coin_toss':
       return `${teamName} receives`;
 
@@ -608,6 +1099,7 @@ function setPlayResult(team, playType, beginPosition, endPosition, opts = {}) {
     endPosition,
     outcome: opts.outcome ?? null,
     turnoverReason: opts.turnoverReason ?? null,
+    offender: opts.offender ?? null,
     points: opts.points ?? null
   };
 }
@@ -623,7 +1115,10 @@ function renderScoreboard() {
     elements.possessionDisplay.textContent = '';
   } else if (gameState.overtime) {
     elements.quarterDisplay.textContent = 'OT';
-    elements.possessionDisplay.textContent = `Round ${gameState.overtime.round}`;
+    const ot = gameState.overtime;
+    elements.possessionDisplay.textContent = ot.fgShootout
+      ? `FG shootout ${ot.fgShootout.round}`
+      : `Poss ${gameState.possession}`;
   } else {
     elements.quarterDisplay.textContent = `Q${gameState.quarter}`;
     elements.possessionDisplay.textContent = `Poss ${gameState.possession}/${POSSESSIONS_PER_QUARTER}`;
@@ -676,7 +1171,7 @@ function renderDownDistance() {
     : `${downNames[gameState.down - 1]} & ${cupsToGo}`;
 
   // Kickoff phases - show kickoff situation
-  if ([Phase.KICKOFF, Phase.KICKOFF_KICK, Phase.ONSIDE_KICK].includes(phase)) {
+  if ([Phase.KICKOFF_CHOICE, Phase.KICKOFF, Phase.ONSIDE_KICK].includes(phase)) {
     elements.downText.textContent = 'Kickoff';
     elements.situationText.textContent = `${offenseTeam().name} kicking`;
     return;
@@ -705,43 +1200,10 @@ function renderDownDistance() {
 
 // Phase groupings for field rendering
 const RETURN_PHASES = [Phase.KICKOFF_RETURN, Phase.PUNT_RETURN];
-const THROWING_PHASES = [Phase.THROW_PLAY, Phase.KICKOFF_KICK, Phase.ONSIDE_KICK, Phase.KICKOFF_RETURN,
+const THROWING_PHASES = [Phase.THROW_PLAY, Phase.KICKOFF, Phase.ONSIDE_KICK, Phase.KICKOFF_RETURN,
                          Phase.PUNT, Phase.PUNT_RETURN, Phase.FIELD_GOAL_ATTEMPT, Phase.EXTRA_POINT,
                          Phase.OVERTIME_FIELD_GOAL, Phase.INCOMPLETE_DEFENSE_SHOT];
-const PLAY_PHASES = [Phase.NORMAL_PLAY, Phase.PLAY_RESULT, Phase.THROW_PLAY, Phase.FIELD_GOAL_ATTEMPT, Phase.PUNT, Phase.INCOMPLETE_DEFENSE_SHOT];
-
-// Calculate ball display position based on current phase
-function calculateBallPosition() {
-  const phase = gameState.phase;
-  const team = gameState.offenseTeam;
-
-  switch (phase) {
-    case Phase.COIN_TOSS:
-      return FieldPosition.MIDFIELD;
-
-    case Phase.KICKOFF:
-    case Phase.KICKOFF_KICK:
-    case Phase.ONSIDE_KICK:
-      // Kicking from team's own 25 (opposite their scoring direction)
-      return -team * FieldPosition.YARD_25;
-
-    case Phase.TOUCHDOWN_CONVERSION:
-      // Ball in scoring endzone
-      return team * FieldPosition.ENDZONE_RIGHT;
-
-    case Phase.KICKOFF_RETURN:
-    case Phase.PUNT_RETURN:
-      const landing = gameState.phaseData?.kickLanding ?? gameState.phaseData?.puntLanding;
-      if (landing != null) {
-        return FieldPosition.clampToEndzone(landing);
-      }
-      return gameState.ballPosition;
-
-    default:
-      // All other phases use actual ball position
-      return gameState.ballPosition;
-  }
-}
+const PLAY_PHASES = [Phase.NORMAL_PLAY, Phase.RUN_PLAY, Phase.THROW_PLAY, Phase.FIELD_GOAL_ATTEMPT, Phase.PUNT, Phase.INCOMPLETE_DEFENSE_SHOT];
 
 // Render the top row: football and direction arrow
 function renderBallRow(ballPos, isReturnPhase, offenseGoesRight) {
@@ -787,125 +1249,6 @@ function renderBallRow(ballPos, isReturnPhase, offenseGoesRight) {
   return ballRow;
 }
 
-// Calculate return effect for a cup in kickoff/punt return phases
-// Returns { className, text } for the effect indicator
-function getReturnEffect(cupIndex, landing, returnerTeam) {
-  const inEndzone = FieldPosition.isInEndzone(landing);
-  const returnModifier = cupIndex * returnerTeam + 1;
-  const finalPosition = landing + returnModifier * returnerTeam;
-  const clampedFinal = FieldPosition.clampToField(finalPosition);
-  const isTD = FieldPosition.isTouchdown(finalPosition, returnerTeam);
-  const finalInOwnEndzone = FieldPosition.isSafety(finalPosition, returnerTeam);
-  const isRecovery = finalInOwnEndzone && (inEndzone || returnModifier <= 0);
-
-  if (isTD) return { className: 'effect-gain', text: 'TD' };
-  if (isRecovery) return { className: 'effect-turnover', text: 'REC' };
-  if (inEndzone) {
-    const effectivePos = (clampedFinal + returnerTeam * FieldPosition.FIELD_MAX) * returnerTeam + 1;
-    return {
-      className: effectivePos > 1 ? 'effect-gain' : 'effect-neutral',
-      text: `+${effectivePos}`
-    };
-  }
-  if (returnModifier >= 1) return { className: 'effect-gain', text: `+${returnModifier}` };
-  if (returnModifier === 0) return { className: 'effect-neutral', text: '0' };
-  return { className: 'effect-loss', text: String(returnModifier) };
-}
-
-// Get the effect class and text for a single cup in the effect row
-function getCupEffect(cupIndex, phase) {
-  const effect = { className: '', text: '' };
-  const team = gameState.offenseTeam;
-
-  if (phase === Phase.FIELD_GOAL_ATTEMPT || phase === Phase.OVERTIME_FIELD_GOAL) {
-    // Valid FG: cup at ball position or behind it (toward kicker's home)
-    const ballPos = gameState.ballPosition;
-    const isValidFG = cupIndex * team <= ballPos * team;
-    effect.className = isValidFG ? 'effect-gain' : 'effect-turnover';
-    effect.text = isValidFG ? 'FG' : '0';
-  } else if (phase === Phase.EXTRA_POINT) {
-    effect.className = 'effect-gain';
-    effect.text = '1PT';
-  } else if (phase === Phase.ONSIDE_KICK) {
-    // Onside kick: only 35, 40, 45 yard lines are valid (toward opponent from kicking team's 25)
-    const validPositions = [-team * 3, -team * 2, -team * 1];
-    const inRange = validPositions.includes(cupIndex);
-    if (inRange) {
-      const cups = cupIndex === -team * 3 ? 2 : cupIndex === -team * 2 ? 3 : 4;
-      effect.className = 'effect-gain';
-      effect.text = `+${cups}`;
-    } else {
-      effect.className = 'effect-loss';
-      effect.text = '+2';
-    }
-  } else if ([Phase.KICKOFF_KICK, Phase.PUNT].includes(phase)) {
-    // Good direction: toward opponent (same as team's scoring direction)
-    const modifier = cupIndex * team + 1;  // +1 offset gives +2 to +20 range
-    const totalMovement = BASE_KICK_DISTANCE + modifier;
-
-    if (totalMovement > BASE_KICK_DISTANCE) effect.className = 'effect-gain';
-    else if (totalMovement === BASE_KICK_DISTANCE) effect.className = 'effect-neutral';
-    else effect.className = 'effect-loss';
-    effect.text = `+${totalMovement}`;
-  } else if (RETURN_PHASES.includes(phase)) {
-    const landing = gameState.phaseData?.kickLanding ?? gameState.phaseData?.puntLanding;
-    if (landing != null) {
-      const result = getReturnEffect(cupIndex, landing, team);
-      effect.className = result.className;
-      effect.text = result.text;
-    }
-  } else if (phase === Phase.THROW_PLAY) {
-    // Relative position: cup * team (positive = toward scoring endzone)
-    const relPos = cupIndex * team;
-
-    if (relPos >= THROW_ZONES.SACK_FUMBLE_START && relPos <= THROW_ZONES.SACK_FUMBLE_END) {
-      effect.className = 'effect-turnover'; effect.text = 'FUM';
-    } else if (relPos >= THROW_ZONES.MIDDLE_START && relPos <= -1) {
-      const yards = relPos + 1;  // -4→-3, -3→-2, -2→-1, -1→0
-      effect.className = yards < 0 ? 'effect-loss' : 'effect-neutral';
-      effect.text = yards < 0 ? String(yards) : '0';
-    } else if (relPos >= 0 && relPos <= THROW_ZONES.MIDDLE_END) {
-      effect.className = 'effect-gain';
-      effect.text = `+${relPos + 1}`;  // 0→+1, 1→+2, 2→+3, 3→+4
-    } else if (relPos === THROW_ZONES.INCOMPLETE_30 || relPos === THROW_ZONES.INCOMPLETE_20) {
-      effect.className = 'effect-neutral';
-      effect.text = '0';
-    } else if (relPos === THROW_ZONES.INTERCEPTION) {
-      effect.className = 'effect-turnover';
-      effect.text = 'INT';
-    } else if (relPos >= THROW_ZONES.DEEP_START && relPos <= THROW_ZONES.DEEP_END) {
-      effect.className = 'effect-gain';
-      effect.text = '5+';
-    }
-  } else if (phase === Phase.INCOMPLETE_DEFENSE_SHOT) {
-    // Defense throws from their endzone toward offense's endzone
-    // relPos from defense's perspective (positive = toward offense's endzone)
-    const defenseTeam = -team;
-    const relPos = cupIndex * defenseTeam;
-
-    if (relPos <= 0) {
-      // Defense's side + 50: +1 for offense
-      effect.className = 'effect-gain';
-      effect.text = '+1';
-    } else if (relPos === 1) {
-      // Offense's 45: 0
-      effect.className = 'effect-neutral';
-      effect.text = '0';
-    } else if (relPos >= 2 && relPos <= 4) {
-      // Offense's 40/35/30: -1/-2/-3
-      const yards = -(relPos - 1);  // 2→-1, 3→-2, 4→-3
-      effect.className = 'effect-loss';
-      effect.text = String(yards);
-    } else if (relPos >= 5) {
-      // Offense's 25-5: sack fumble
-      effect.className = 'effect-turnover';
-      effect.text = 'FUM';
-    }
-  }
-
-  return effect;
-}
-
 // Render the bottom row: cup effects and throwing indicator
 function renderEffectRow(offenseGoesRight) {
   const effectRow = document.createElement('div');
@@ -920,7 +1263,7 @@ function renderEffectRow(offenseGoesRight) {
     throwArrow.className = `direction-arrow ${throwerGoesRight ? 'left' : 'right'}`;
     // Use play-specific emoji for throw indicator
     let throwEmoji;
-    if ([Phase.KICKOFF_KICK, Phase.ONSIDE_KICK, Phase.PUNT].includes(gameState.phase)) {
+    if ([Phase.KICKOFF, Phase.ONSIDE_KICK, Phase.PUNT].includes(gameState.phase)) {
       throwEmoji = '👟';  // Cleat for kicks/punts
     } else if (isFieldGoalKick) {
       throwEmoji = '🥅';  // Goal for field goals
@@ -935,14 +1278,19 @@ function renderEffectRow(offenseGoesRight) {
     effectRow.appendChild(throwArrow);
   }
 
+  const context = {
+    team: gameState.offenseTeam,
+    ballPosition: gameState.ballPosition,
+    phaseData: gameState.phaseData
+  };
+
   for (let cup = FieldPosition.FIELD_MIN; cup <= FieldPosition.FIELD_MAX; cup++) {
-    const cupEffect = getCupEffect(cup, gameState.phase);
-    // Only render cups that have an effect
-    if (!cupEffect.className && !cupEffect.text) continue;
+    const cupEffect = calculateCupEffect(gameState.phase, cup, context);
+    if (!cupEffect) continue;
     const effect = document.createElement('div');
     effect.className = 'cup-effect';
     effect.style.left = `${(cup + 10) * 5}%`;  // -9→5%, 0→50%, +9→95%
-    if (cupEffect.className) effect.classList.add(cupEffect.className);
+    effect.classList.add(EFFECT_STYLING[cupEffect.type].effectClass);
     if (cupEffect.text) effect.textContent = cupEffect.text;
     effectRow.appendChild(effect);
   }
@@ -976,7 +1324,7 @@ function renderNumberRow() {
 // 1. Set phaseData = { offensePlayers, isQBSneak } when entering the phase
 // 2. Have a control renderer with result buttons (and offsides if applicable)
 // 3. Are included in this array for player circle rendering
-const FLIP_CUP_PHASES = [Phase.PLAY_RESULT, Phase.TWO_POINT_CONVERSION];
+const FLIP_CUP_PHASES = [Phase.RUN_PLAY, Phase.TWO_POINT_CONVERSION];
 
 function renderPlayerCircles() {
   if (!FLIP_CUP_PHASES.includes(gameState.phase)) return null;
@@ -1142,7 +1490,7 @@ function renderEndzones(ballPos, isReturnPhase) {
 function renderField() {
   elements.field.innerHTML = '';
 
-  const ballPos = calculateBallPosition();
+  const ballPos = gameState.ballPosition;
   const isReturnPhase = RETURN_PHASES.includes(gameState.phase);
   const offenseGoesRight = gameState.offenseTeam > 0;  // Team +1 goes right
 
@@ -1166,907 +1514,308 @@ function renderField() {
   renderEndzones(ballPos, isReturnPhase);
 }
 
-// Helper to get CSS class number (1 or 2) from team ID (+1 or -1)
-function teamCssClass(teamId) {
-  return teamId > 0 ? 1 : 2;
+// ============ Control Rendering ============
+
+// Shared helper: Field goal attempt controls (FG, XP, OT FG)
+function renderFGAttemptControls(title, makeLabel) {
+  return controlSection(title, gameState.offenseTeam,
+    Button.danger('No good', 'fg-result', { result: 'miss' }) +
+    Button.success(makeLabel, 'fg-result', { result: 'make' })
+  );
 }
 
-// Control renderers
-const controlRenderers = {
-  [Phase.COIN_TOSS]: () => controlSection(
-    'Coin toss - receiving team',
-    null,
-    Button.team(1, gameState.team1.name, 'coin-toss', { team: 1 }) +
-    Button.team(-1, gameState.team2.name, 'coin-toss', { team: -1 })
-  ),
+// Shared helper: Return controls (kickoff return, punt return)
+function renderReturnControls() {
+  const landing = gameState.phaseData?.landing ?? gameState.ballPosition;
+  const inEndzone = FieldPosition.isInEndzone(gameState.ballPosition);
+  const missLabel = inEndzone ? 'Missed (+1)' : 'Missed (0)';
+  return gridSection(
+    `${offenseTeam().name} - return (first of 2)`,
+    gameState.offenseTeam,
+    renderReturnGrid('return-result', landing, gameState.offenseTeam),
+    missLabel, 'return-miss'
+  );
+}
 
-  [Phase.KICKOFF]: () => {
-    const onsideOnly = gameState.phaseData?.onsideOnly;
+// Shared helper: Kick/punt grid controls
+function renderKickGridControls(title, phase) {
+  return gridSection(title, gameState.offenseTeam,
+    renderCupSelectGrid('kick-land', phase),
+    'Missed (+10)', 'kick-miss'
+  );
+}
 
-    if (onsideOnly) {
-      // Out of possessions - offer onside or skip
-      const isQ4 = gameState.quarter === TOTAL_QUARTERS;
-      const isTied = gameState.team1.score === gameState.team2.score;
-      const skipLabel = isQ4 ? (isTied ? 'To overtime' : 'End game') : 'End quarter';
-      return controlSection(
-        `${offenseTeam().name} - onside kickoff option`,
-        gameState.offenseTeam,
-        Button.primary('Onside kick', 'onside-kick') +
-        Button.neutral(skipLabel, 'skip-kickoff')
+// Main control renderer - returns HTML for current phase
+function renderControlsForPhase() {
+  const teamName = offenseTeam().name;
+  const team = gameState.offenseTeam;
+
+  switch (gameState.phase) {
+    case Phase.COIN_TOSS:
+      return controlSection('Coin toss - receiving team', null,
+        Button.team(1, gameState.team1.name, 'coin-toss', { team: 1 }) +
+        Button.team(-1, gameState.team2.name, 'coin-toss', { team: -1 })
+      );
+
+    case Phase.KICKOFF_CHOICE: {
+      const onsideOnly = gameState.phaseData?.onsideOnly;
+      if (onsideOnly) {
+        const isQ4 = gameState.quarter === TOTAL_QUARTERS;
+        const isTied = gameState.team1.score === gameState.team2.score;
+        const skipLabel = isQ4 ? (isTied ? 'To overtime' : 'End game') : 'End quarter';
+        return controlSection(`${teamName} - onside kickoff option`, team,
+          Button.primary('Onside kick', 'onside-kick') +
+          Button.neutral(skipLabel, 'skip-kickoff')
+        );
+      }
+      const canOnside = gameState.phaseData?.allowOnside && gameState.possession > 0;
+      return controlSection(`${teamName} - kickoff type`, team,
+        Button.primary('Regular', 'regular-kickoff') +
+        (canOnside ? Button.neutral('Onside', 'onside-kick') : '')
       );
     }
 
-    const buttons = Button.primary('Regular', 'regular-kickoff');
-    // Onside only available when possession > 0 (not at start of quarter)
-    const canOnside = gameState.phaseData?.allowOnside && gameState.possession > 0;
-    const onsideBtn = canOnside ? Button.neutral('Onside', 'onside-kick') : '';
-    return controlSection(
-      `${offenseTeam().name} - kickoff type`,
-      gameState.offenseTeam,
-      buttons + onsideBtn
-    );
-  },
+    case Phase.KICKOFF:
+      return renderKickGridControls(`${teamName} - kickoff (first of 2)`, Phase.KICKOFF);
 
-  [Phase.KICKOFF_KICK]: () => gridSection(
-    `${offenseTeam().name} - kickoff (first of 2)`,
-    gameState.offenseTeam,
-    renderCupSelectGrid('kickoff-land'),
-    'Missed (+10)', 'kickoff-miss'
-  ),
+    case Phase.ONSIDE_KICK:
+      return controlSection(`${teamName} - onside kick (one attempt)`, team,
+        renderOnsideRecoveryGrid(),
+        Button.warning('Missed (+2)', 'onside-miss')
+      );
 
-  [Phase.ONSIDE_KICK]: () => controlSection(
-    `${offenseTeam().name} - onside kick (one attempt)`,
-    gameState.offenseTeam,
-    renderOnsideRecoveryGrid(),
-    Button.warning('Missed (+2)', 'onside-miss')
-  ),
+    case Phase.KICKOFF_RETURN:
+      return renderReturnControls();
 
-  [Phase.KICKOFF_RETURN]: () => {
-    const landing = gameState.phaseData?.kickLanding ?? 0;
-    const missLabel = FieldPosition.isInEndzone(landing) ? 'Missed (+1)' : 'Missed (0)';
-    return gridSection(
-      `${offenseTeam().name} - return (first of 2)`,
-      gameState.offenseTeam,
-      renderKickoffReturnGrid('return-hit'),
-      missLabel, 'return-miss'
-    );
-  },
+    case Phase.PUNT:
+      return renderKickGridControls(`${teamName} - punting (first of 2)`, Phase.PUNT);
 
-  [Phase.NORMAL_PLAY]: () => {
-    const downNames = ['1st', '2nd', '3rd', '4th'];
-    const isFourthDown = gameState.down === 4;
-    const playVariant = isFourthDown ? 'neutral' : 'primary';
-    const fgVariant = isFourthDown ? 'primary' : 'neutral';
-    // Punt is wasteful on last possession of Q2/Q4 (no kickoff follows)
-    const isLastPossessionOfHalf = gameState.possession >= POSSESSIONS_PER_QUARTER &&
-                                   (gameState.quarter === 2 || gameState.quarter === 4);
-    const puntVariant = (isFourthDown && !isLastPossessionOfHalf) ? 'primary' : 'neutral';
-    return controlSection(
-      `${offenseTeam().name} - ${downNames[gameState.down - 1]} down`,
-      gameState.offenseTeam,
-      Button.create('Sneak 1v1', 'qb-sneak', {}, { variant: playVariant }) +
-      Button.create('Run 2v3', 'select-players', { count: 2 }, { variant: playVariant }) +
-      Button.create('Run 3v4', 'select-players', { count: 3 }, { variant: playVariant }) +
-      Button.create('Run 4v5', 'select-players', { count: 4 }, { variant: playVariant }) +
-      Button.create('Pass', 'start-throw', {}, { variant: playVariant }),
-      Button.create('Field goal', 'fourth-down', { choice: 'fg' }, { variant: fgVariant }) +
-      Button.create('Punt', 'fourth-down', { choice: 'punt' }, { variant: puntVariant })
-    );
-  },
+    case Phase.PUNT_RETURN:
+      return renderReturnControls();
 
-  [Phase.PLAY_RESULT]: () => {
-    const { offensePlayers, isQBSneak } = gameState.phaseData;
-    const offsidesRow = Button.warning('Offense 🚩 (-1)', 'offsides', { dir: -1 }) +
-                        Button.warning('Defense 🚩 (+1)', 'offsides', { dir: 1 });
-
-    if (isQBSneak) {
-      return controlSection(
-        `${offenseTeam().name} - Sneak 1v1`,
-        gameState.offenseTeam,
-        Button.neutral('Tied or lost (0)', 'result', { cups: 0 }) +
-        Button.success('Won (+1)', 'result', { cups: 1 }),
-        offsidesRow
+    case Phase.NORMAL_PLAY: {
+      const downNames = ['1st', '2nd', '3rd', '4th'];
+      const isFourthDown = gameState.down === 4;
+      const playVariant = isFourthDown ? 'neutral' : 'primary';
+      const fgVariant = isFourthDown ? 'primary' : 'neutral';
+      const puntUseless = gameState.overtime ||
+        (gameState.possession >= POSSESSIONS_PER_QUARTER &&
+         (gameState.quarter === 2 || gameState.quarter === 4));
+      const puntVariant = (isFourthDown && !puntUseless) ? 'primary' : 'neutral';
+      return controlSection(`${teamName} - ${downNames[gameState.down - 1]} down`, team,
+        Button.create('Sneak 1v1', 'run', { count: 1 }, { variant: playVariant }) +
+        Button.create('Run 2v3', 'run', { count: 2 }, { variant: playVariant }) +
+        Button.create('Run 3v4', 'run', { count: 3 }, { variant: playVariant }) +
+        Button.create('Run 4v5', 'run', { count: 4 }, { variant: playVariant }) +
+        Button.create('Pass', 'pass', {}, { variant: playVariant }),
+        Button.create('Field goal', 'field-goal', {}, { variant: fgVariant }) +
+        Button.create('Punt', 'punt', {}, { variant: puntVariant })
       );
     }
 
-    const defensePlayers = offensePlayers + 1;
-    const buttons = [];
-
-    for (let i = offensePlayers; i >= 1; i--) {
-      const yards = FLIP_CUP_YARDAGE[i];
-      const isFumble = i === offensePlayers && offensePlayers > 1;
-      const label = isFumble ? `Fumble (-${yards})` : `-${yards}`;
-      const variant = isFumble ? 'danger' : 'warning';
-      buttons.push(Button.create(label, 'result', { cups: -i }, { variant }));
+    case Phase.RUN_PLAY: {
+      const { offensePlayers, isQBSneak } = gameState.phaseData;
+      const offsidesRow = Button.warning('Offense 🚩 (-1)', 'offsides', { dir: -1 }) +
+                          Button.warning('Defense 🚩 (+1)', 'offsides', { dir: 1 });
+      if (isQBSneak) {
+        return controlSection(`${teamName} - Sneak 1v1`, team,
+          Button.neutral('Tied or lost (0)', 'result', { cups: 0 }) +
+          Button.success('Won (+1)', 'result', { cups: 1 }),
+          offsidesRow
+        );
+      }
+      const defensePlayers = offensePlayers + 1;
+      const buttons = [];
+      for (let i = offensePlayers; i >= 1; i--) {
+        const yards = FLIP_CUP_YARDAGE[i];
+        const isFumble = i === offensePlayers && offensePlayers > 1;
+        buttons.push(Button.create(isFumble ? `Fumble (-${yards})` : `-${yards}`,
+          'result', { cups: -i }, { variant: isFumble ? 'danger' : 'warning' }));
+      }
+      buttons.push(Button.neutral('0', 'result', { cups: 0 }));
+      for (let i = 1; i <= defensePlayers; i++) {
+        const yards = FLIP_CUP_YARDAGE[i];
+        buttons.push(Button.success(yards === 'TD' ? 'Touchdown' : `+${yards}`, 'result', { cups: i }));
+      }
+      return controlSection(`${teamName} - run (${offensePlayers}v${defensePlayers})`, team,
+        buttons.join(''), offsidesRow);
     }
-    buttons.push(Button.neutral('0', 'result', { cups: 0 }));
-    for (let i = 1; i <= defensePlayers; i++) {
-      const yards = FLIP_CUP_YARDAGE[i];
-      const label = yards === 'TD' ? 'Touchdown' : `+${yards}`;
-      buttons.push(Button.success(label, 'result', { cups: i }));
+
+    case Phase.THROW_PLAY:
+      return controlSection(`${teamName} - passing (first of 3)`, team,
+        Button.danger('Sack fumble (-3)', 'throw-result', { result: 'sack_fumble' }) +
+        Button.warning('-3', 'throw-result', { result: '-3' }) +
+        Button.warning('-2', 'throw-result', { result: '-2' }) +
+        Button.warning('-1', 'throw-result', { result: '-1' }) +
+        Button.neutral('0', 'throw-result', { result: '0' }) +
+        Button.success('+1', 'throw-result', { result: '1' }) +
+        Button.success('+2', 'throw-result', { result: '2' }) +
+        Button.success('+3', 'throw-result', { result: '3' }) +
+        Button.success('+4', 'throw-result', { result: '4' }),
+        Button.neutral('Incomplete (0)', 'throw-result', { result: 'incomplete' }) +
+        Button.danger('Interception (0)', 'throw-result', { result: 'int' }) +
+        Button.success('+5', 'throw-result', { result: '5' }) +
+        '<span style="color: var(--text-muted); margin: 0 0.5rem;">Called:</span>' +
+        Button.success('+6', 'throw-result', { result: '6' }) +
+        Button.success('+9', 'throw-result', { result: '9' }) +
+        Button.success('Touchdown', 'throw-result', { result: 'td' })
+      );
+
+    case Phase.INCOMPLETE_DEFENSE_SHOT:
+      return controlSection(`${getTeam(-team).name} - incomplete response (1 attempt)`, -team,
+        Button.success('+1', 'defense-incomplete-shot', { result: '1' }) +
+        Button.neutral('0', 'defense-incomplete-shot', { result: '0' }) +
+        Button.warning('-1', 'defense-incomplete-shot', { result: '-1' }) +
+        Button.warning('-2', 'defense-incomplete-shot', { result: '-2' }) +
+        Button.warning('-3', 'defense-incomplete-shot', { result: '-3' }) +
+        Button.danger('Sack fumble (-3)', 'defense-incomplete-shot', { result: 'fumble' }),
+        Button.neutral('Missed (0)', 'defense-incomplete-shot', { result: 'miss' })
+      );
+
+    case Phase.FIELD_GOAL_ATTEMPT:
+      return renderFGAttemptControls(`${teamName} - field goal (first of 3)`, 'Field goal');
+
+    case Phase.EXTRA_POINT:
+      return renderFGAttemptControls(`${teamName} - extra point (first of 3)`, 'Extra point');
+
+    case Phase.OVERTIME_FIELD_GOAL:
+      return renderFGAttemptControls(`${teamName} - OT field goal (1 attempt)`, 'Field goal');
+
+    case Phase.TOUCHDOWN_CONVERSION:
+      return controlSection(`${teamName} - touchdown!`, team,
+        Button.primary('Extra point (1 pt)', 'conversion-choice', { choice: 'xp' }) +
+        Button.primary('Two-point (2 pts)', 'conversion-choice', { choice: '2pt' })
+      );
+
+    case Phase.TWO_POINT_CONVERSION:
+      return controlSection(`${teamName} - Two-point 1v1`, team,
+        Button.neutral('No good', 'two-point', { cups: 0 }) +
+        Button.success('2 points', 'two-point', { cups: 1 })
+      );
+
+    case Phase.GAME_OVER: {
+      const winner = gameState.team1.score > gameState.team2.score ? gameState.team1 : gameState.team2;
+      const winnerTeam = gameState.team1.score > gameState.team2.score ? 1 : -1;
+      return controlSection(`${winner.name} wins! (${gameState.team1.score} - ${gameState.team2.score})`, winnerTeam,
+        Button.neutral('New game', 'new-game')
+      );
     }
 
-    return controlSection(
-      `${offenseTeam().name} - run (${offensePlayers}v${defensePlayers})`,
-      gameState.offenseTeam,
-      buttons.join(''),
-      offsidesRow
-    );
-  },
+    case Phase.OVERTIME_START:
+      return controlSection('Overtime - first possession', null,
+        Button.team(1, gameState.team1.name, 'ot-first', { team: 1 }) +
+        Button.team(-1, gameState.team2.name, 'ot-first', { team: -1 })
+      );
 
-  [Phase.THROW_PLAY]: () => {
-    const row1 =
-      Button.danger('Sack fumble (-3)', 'throw-result', { result: 'sack_fumble' }) +
-      Button.warning('-3', 'throw-result', { result: '-3' }) +
-      Button.warning('-2', 'throw-result', { result: '-2' }) +
-      Button.warning('-1', 'throw-result', { result: '-1' }) +
-      Button.neutral('0', 'throw-result', { result: '0' }) +
-      Button.success('+1', 'throw-result', { result: '1' }) +
-      Button.success('+2', 'throw-result', { result: '2' }) +
-      Button.success('+3', 'throw-result', { result: '3' }) +
-      Button.success('+4', 'throw-result', { result: '4' });
-    const row2 =
-      Button.neutral('Incomplete (0)', 'throw-result', { result: 'incomplete' }) +
-      Button.danger('Interception (0)', 'throw-result', { result: 'int' }) +
-      Button.success('+5', 'throw-result', { result: '5' }) +
-      '<span style="color: var(--text-muted); margin: 0 0.5rem;">Called:</span>' +
-      Button.success('+6', 'throw-result', { result: '6' }) +
-      Button.success('+9', 'throw-result', { result: '9' }) +
-      Button.success('Touchdown', 'throw-result', { result: 'td' });
-    return controlSection(
-      `${offenseTeam().name} - passing (first of 3)`,
-      gameState.offenseTeam,
-      row1, row2
-    );
-  },
-
-  [Phase.INCOMPLETE_DEFENSE_SHOT]: () => {
-    const defenseTeamObj = getTeam(-gameState.offenseTeam);
-    const row1 =
-      Button.success('+1', 'defense-incomplete-shot', { result: '1' }) +
-      Button.neutral('0', 'defense-incomplete-shot', { result: '0' }) +
-      Button.warning('-1', 'defense-incomplete-shot', { result: '-1' }) +
-      Button.warning('-2', 'defense-incomplete-shot', { result: '-2' }) +
-      Button.warning('-3', 'defense-incomplete-shot', { result: '-3' }) +
-      Button.danger('Sack fumble (-3)', 'defense-incomplete-shot', { result: 'fumble' });
-    const row2 =
-      Button.neutral('Missed (0)', 'defense-incomplete-shot', { result: 'miss' });
-    return controlSection(
-      `${defenseTeamObj.name} - incomplete response (1 attempt)`,
-      -gameState.offenseTeam,
-      row1, row2
-    );
-  },
-
-  [Phase.PUNT]: () => gridSection(
-    `${offenseTeam().name} - punting (first of 2)`,
-    gameState.offenseTeam,
-    renderCupSelectGrid('punt-hit'),
-    'Missed (+10)', 'punt-miss'
-  ),
-
-  [Phase.PUNT_RETURN]: () => {
-    const landing = gameState.phaseData?.puntLanding ?? 0;
-    const missLabel = FieldPosition.isInEndzone(landing) ? 'Missed (+1)' : 'Missed (0)';
-    return gridSection(
-      `${offenseTeam().name} - punt return (first of 2)`,
-      gameState.offenseTeam,
-      renderPuntReturnGrid('punt-return-hit'),
-      missLabel, 'punt-return-miss'
-    );
-  },
-
-  [Phase.FIELD_GOAL_ATTEMPT]: () => controlSection(
-    `${offenseTeam().name} - field goal (first of 3)`,
-    gameState.offenseTeam,
-    Button.danger('No good', 'field-goal', { result: 'miss' }) +
-    Button.success('Field goal', 'field-goal', { result: 'make' })
-  ),
-
-  [Phase.TOUCHDOWN_CONVERSION]: () => controlSection(
-    `${offenseTeam().name} - touchdown!`,
-    gameState.offenseTeam,
-    Button.primary('Extra point (1 pt)', 'conversion-choice', { choice: 'xp' }) +
-    Button.primary('Two-point (2 pts)', 'conversion-choice', { choice: '2pt' })
-  ),
-
-  [Phase.EXTRA_POINT]: () => controlSection(
-    `${offenseTeam().name} - extra point (first of 3)`,
-    gameState.offenseTeam,
-    Button.neutral('No good', 'extra-point', { result: 'miss' }) +
-    Button.success('Extra point', 'extra-point', { result: 'make' })
-  ),
-
-  [Phase.TWO_POINT_CONVERSION]: () => controlSection(
-    `${offenseTeam().name} - Two-point 1v1`,
-    gameState.offenseTeam,
-    Button.neutral('No good', 'two-point', { cups: 0 }) +
-    Button.success('2 points', 'two-point', { cups: 1 })
-  ),
-
-  [Phase.GAME_OVER]: () => {
-    const winner = gameState.team1.score > gameState.team2.score ? gameState.team1 : gameState.team2;
-    const winnerTeam = gameState.team1.score > gameState.team2.score ? 1 : -1;
-    return controlSection(
-      `${winner.name} wins! (${gameState.team1.score} - ${gameState.team2.score})`,
-      winnerTeam,
-      Button.neutral('New game', 'new-game')
-    );
-  },
-
-  [Phase.OVERTIME_START]: () => controlSection(
-    'Overtime - first possession',
-    null,
-    Button.team(1, gameState.team1.name, 'ot-first', { team: 1 }) +
-    Button.team(-1, gameState.team2.name, 'ot-first', { team: -1 })
-  ),
-
-  [Phase.OVERTIME_FIELD_GOAL]: () => controlSection(
-    `${offenseTeam().name} - OT field goal (first of 3)`,
-    gameState.offenseTeam,
-    Button.neutral('Missed', 'ot-fg', { result: 'miss' }) +
-    Button.success('Field goal', 'ot-fg', { result: 'make' })
-  )
-};
+    default:
+      return '';
+  }
+}
 
 function renderControls() {
-  const renderer = controlRenderers[gameState.phase];
-  elements.controls.innerHTML = renderer ? renderer() : '';
+  elements.controls.innerHTML = renderControlsForPhase();
   elements.controls.querySelectorAll('[data-action]').forEach(btn => {
-    btn.addEventListener('click', handleAction);
+    btn.addEventListener('click', dispatch);
   });
 }
 
 // ============ Action Handling ============
 
-const actionHandlers = {
-  'coin-toss': e => handleCoinToss(parseInt(e.target.dataset.team)),
-  'regular-kickoff': handleRegularKickoff,
-  'kickoff-land': e => handleKickoffLand(parseInt(e.target.dataset.cup)),
-  'kickoff-miss': handleKickoffMiss,
-  'onside-kick': handleOnsideKick,
-  'skip-kickoff': handleSkipKickoff,
-  'onside-recovery': e => handleOnsideRecovery(parseInt(e.target.dataset.pos)),
-  'onside-miss': handleOnsideMiss,
-  'return-hit': e => handleReturn(parseInt(e.target.dataset.cup)),
-  'return-miss': handleReturnMiss,
-  'punt-hit': e => handlePuntKick(parseInt(e.target.dataset.cup)),
-  'punt-miss': handlePuntMiss,
-  'punt-return-hit': e => handlePuntReturn(parseInt(e.target.dataset.cup)),
-  'punt-return-miss': handlePuntReturnMiss,
-  'select-players': e => handleSelectPlayers(parseInt(e.target.dataset.count), false),
-  'qb-sneak': () => handleSelectPlayers(1, true),
-  'start-throw': handleStartThrow,
-  'throw-result': e => handleThrowResultSimple(e.target.dataset.result),
-  'defense-incomplete-shot': e => handleDefenseIncompleteShot(e.target.dataset.result),
-  'result': e => handlePlayResult(parseInt(e.target.dataset.cups)),
-  'offsides': e => handleOffsides(parseInt(e.target.dataset.dir)),
-  'fourth-down': e => handleFourthDown(e.target.dataset.choice),
-  'field-goal': e => handleFieldGoal(e.target.dataset.result),
-  'conversion-choice': e => handleConversionChoice(e.target.dataset.choice),
-  'extra-point': e => handleExtraPoint(e.target.dataset.result),
-  'two-point': e => handleTwoPoint(parseInt(e.target.dataset.cups)),
-  'ot-first': e => handleOTFirst(parseInt(e.target.dataset.team)),
-  'ot-fg': e => handleOTFieldGoal(e.target.dataset.result),
-  'new-game': handleNewGame
-};
+// Unified dispatcher - handles all button actions through the state machine
+function dispatch(e) {
+  const { action, ...data } = e.target.dataset;
 
-function handleAction(e) {
-  const action = e.target.dataset.action;
-  const handler = actionHandlers[action];
-  if (handler) {
-    pushHistory();
-    handler(e);
-    saveGame();
-    render();
-  }
-}
-
-// ============ Phase Entry Functions ============
-// Single point of entry for each phase - ensures consistent setup
-
-function enterPhase(phase, data = null) {
-  gameState.phaseData = data;
-  gameState.phase = phase;
-}
-
-// ============ Game Logic ============
-
-function handleCoinToss(receivingTeam) {
-  // Kicker is offense during kick phase
-  gameState.offenseTeam = -receivingTeam;
-  gameState.openingKickoffReceiver = receivingTeam;
-  setPlayResult(receivingTeam, 'coin_toss', 0, 0);
-  enterKickoffPhase(false);  // No onside at start of game
-}
-
-function enterKickoffPhase(allowOnside = true) {
-  // Ball at kicking team's 25 (their own territory, opposite their scoring direction)
-  gameState.ballPosition = -gameState.offenseTeam * FieldPosition.YARD_25;
-  // Check if we're out of possessions - only offer onside or skip
-  const outOfPossessions = gameState.possession >= POSSESSIONS_PER_QUARTER;
-  enterPhase(Phase.KICKOFF, { allowOnside, onsideOnly: outOfPossessions });
-}
-
-function handleRegularKickoff() {
-  enterPhase(Phase.KICKOFF_KICK);
-}
-
-function handleSkipKickoff() {
-  // Skip kickoff - advance to next quarter or end game
-  if (gameState.quarter >= TOTAL_QUARTERS) {
-    endGameOrOvertime();
-  } else {
-    gameState.quarter++;
-    if (gameState.quarter === 3) {
-      // Second half: kickoff, team that received opening kickoff now kicks
-      gameState.possession = 0;
-      gameState.offenseTeam = gameState.openingKickoffReceiver;
-      enterKickoffPhase(false);  // No onside at start of half
-    } else {
-      // Q2/Q4: no kickoff, play continues
-      gameState.possession = 1;
-      startNewPossession();
-    }
-  }
-}
-
-// Shared kick/punt handler - calculates landing, flips possession, enters return phase
-function handleKick(cup, kickPhase, returnPhase, landingKey) {
-  const team = gameState.offenseTeam;
-  const beginPos = gameState.ballPosition;
-  const modifier = cup != null ? (cup * team + 1) : 0;  // null cup = miss
-  const landingPos = beginPos + (BASE_KICK_DISTANCE + modifier) * team;
-
-  setPlayResult(team, kickPhase, beginPos, landingPos);
-
-  // Flip to receiver and advance clock
-  gameState.offenseTeam = -team;
-  if (advanceGameClock()) return;
-
-  enterPhase(returnPhase, { [landingKey]: landingPos });
-}
-
-function handleKickoffLand(cup) {
-  handleKick(cup, Phase.KICKOFF_KICK, Phase.KICKOFF_RETURN, 'kickLanding');
-}
-
-function handleKickoffMiss() {
-  handleKick(null, Phase.KICKOFF_KICK, Phase.KICKOFF_RETURN, 'kickLanding');
-}
-
-function handleOnsideKick() {
-  enterPhase(Phase.ONSIDE_KICK);
-}
-
-function handleOnsideRecovery(position) {
-  const team = gameState.offenseTeam;  // Kicker is offense
-  const beginPos = gameState.ballPosition;
-
-  setPlayResult(team, Phase.ONSIDE_KICK, beginPos, position, { outcome: 'recovery' });
-  gameState.ballPosition = position;
-  // Kicker keeps possession - no clock advance, just continue
-  startNewPossession();
-}
-
-function handleOnsideMiss() {
-  const team = gameState.offenseTeam;  // Kicker is offense
-  const beginPos = gameState.ballPosition;
-  const endPos = -team * 3;  // Ball at 35 yard line (toward opponent from kicking team's 25)
-
-  setPlayResult(team, Phase.ONSIDE_KICK, beginPos, endPos, { outcome: 'missed' });
-  gameState.ballPosition = endPos;
-  handleTurnover();
-}
-
-// Calculate return outcome: 'td', 'recovery', or 'normal'
-function calculateReturn(cup, landing, returnerTeam) {
-  const returnModifier = cup * returnerTeam + 1;
-  const finalPosition = landing + returnModifier * returnerTeam;
-
-  if (FieldPosition.isTouchdown(finalPosition, returnerTeam)) {
-    return { type: 'td', finalPosition, returnModifier };
-  }
-  if (returnModifier <= 0 && FieldPosition.isSafety(finalPosition, returnerTeam)) {
-    return { type: 'recovery', finalPosition, returnModifier };
-  }
-  return { type: 'normal', finalPosition, returnModifier };
-}
-
-// Shared return handler - handles both kickoff and punt returns
-function handleReturnHit(cup, returnPhase, landingKey) {
-  const team = gameState.offenseTeam;
-  const beginPos = gameState.phaseData[landingKey];
-  const result = calculateReturn(cup, beginPos, team);
-
-  if (result.type === 'td') {
-    setPlayResult(team, returnPhase, beginPos, team * FieldPosition.FIELD_MAX, { outcome: 'td' });
-    scoreTouchdown();
+  // Special case: new-game goes back to setup
+  if (action === 'new-game') {
+    clearSavedGame();
+    showSetup();
     return;
   }
 
-  if (result.type === 'recovery') {
-    const endPos = -team * FieldPosition.YARD_5;
-    setPlayResult(team, returnPhase, beginPos, endPos, { outcome: 'recovery' });
-    gameState.ballPosition = endPos;
-    handleTurnover({ advanceClock: false });
-    return;
+  pushHistory();
+  const result = computeTransition(action, data);
+  if (result?.nextPhase) {
+    gameState.phaseData = result.phaseData ?? null;
+    gameState.phase = result.nextPhase;
   }
-
-  const endPos = FieldPosition.clampToField(result.finalPosition);
-  setPlayResult(team, returnPhase, beginPos, endPos);
-  gameState.ballPosition = endPos;
-  startNewPossession();
+  saveGame();
+  render();
 }
 
-function handleReturnMissShared(returnPhase, landingKey) {
-  const team = gameState.offenseTeam;
-  const beginPos = gameState.phaseData[landingKey];
-  const endPos = FieldPosition.clampToField(beginPos);
-
-  setPlayResult(team, returnPhase, beginPos, endPos);
-  gameState.ballPosition = endPos;
-  startNewPossession();
-}
-
-function handleReturn(cup) {
-  handleReturnHit(cup, Phase.KICKOFF_RETURN, 'kickLanding');
-}
-
-function handleReturnMiss() {
-  handleReturnMissShared(Phase.KICKOFF_RETURN, 'kickLanding');
-}
-
-function handleSelectPlayers(count, isQBSneak = false) {
-  enterPhase(Phase.PLAY_RESULT, { offensePlayers: count, isQBSneak });
-}
-
-function handleStartThrow() {
-  enterPhase(Phase.THROW_PLAY);
-}
-
-// Simplified throw result handler - user clicks final result directly
-function handleThrowResultSimple(result) {
-  const team = gameState.offenseTeam;
-  const beginPos = gameState.ballPosition;
-
-  if (result === 'td') {
-    setPlayResult(team, Phase.THROW_PLAY, beginPos, team * FieldPosition.FIELD_MAX, { outcome: 'td', playDetail: 'called' });
-    scoreTouchdown();
-    return;
-  }
-
-  if (result === 'int') {
-    setPlayResult(team, Phase.THROW_PLAY, beginPos, beginPos, { outcome: 'turnover', turnoverReason: 'int' });
-    handleTurnover();
-    return;
-  }
-
-  if (result === 'sack_fumble') {
-    const endPos = beginPos + -3 * team;
-    setPlayResult(team, Phase.THROW_PLAY, beginPos, FieldPosition.clampToField(endPos), { outcome: 'turnover', turnoverReason: 'fumble' });
-    gameState.ballPosition = endPos;
-    handleTurnover({ checkDefensiveScoring: true });
-    return;
-  }
-
-  if (result === 'incomplete') {
-    // Transition to defense shot phase
-    enterPhase(Phase.INCOMPLETE_DEFENSE_SHOT, { incompleteFrom: beginPos });
-    return;
-  }
-
-  const yards = parseInt(result);
-  const endPos = beginPos + yards * team;
-
-  if (FieldPosition.isTouchdown(endPos, team)) {
-    const playDetail = yards >= 6 ? 'called' : null;
-    setPlayResult(team, Phase.THROW_PLAY, beginPos, FieldPosition.clampToField(endPos), { outcome: 'td', playDetail });
-    gameState.ballPosition = FieldPosition.clampToField(endPos);
-    scoreTouchdown();
-    return;
-  }
-
-  if (FieldPosition.isSafety(endPos, team)) {
-    setPlayResult(team, Phase.THROW_PLAY, beginPos, FieldPosition.clampToField(endPos), { outcome: 'safety' });
-    gameState.ballPosition = FieldPosition.clampToField(endPos);
-    scoreSafety();
-    return;
-  }
-
-  gameState.ballPosition = FieldPosition.clampToField(endPos);
-  setPlayResult(team, Phase.THROW_PLAY, beginPos, gameState.ballPosition);
-  checkFirstDownAndAdvance();
-}
-
-// Handle defensive incomplete response shot
-function handleDefenseIncompleteShot(result) {
-  const team = gameState.offenseTeam;
-  const beginPos = gameState.ballPosition;
-
-  if (result === 'fumble') {
-    const endPos = beginPos + -3 * team;
-    setPlayResult(team, Phase.INCOMPLETE_DEFENSE_SHOT, beginPos, FieldPosition.clampToField(endPos), { outcome: 'turnover', turnoverReason: 'fumble' });
-    gameState.ballPosition = endPos;
-    handleTurnover({ checkDefensiveScoring: true });
-    return;
-  }
-
-  const yards = result === 'miss' ? 0 : parseInt(result);
-  const scoringResult = advanceBall(yards);
-
-  if (scoringResult === 'td') {
-    setPlayResult(team, Phase.INCOMPLETE_DEFENSE_SHOT, beginPos, gameState.ballPosition, { outcome: 'td' });
-    return;
-  }
-
-  if (scoringResult === 'safety') {
-    setPlayResult(team, Phase.INCOMPLETE_DEFENSE_SHOT, beginPos, gameState.ballPosition, { outcome: 'safety' });
-    return;
-  }
-
-  setPlayResult(team, Phase.INCOMPLETE_DEFENSE_SHOT, beginPos, gameState.ballPosition, { outcome: 'incomplete' });
-  checkFirstDownAndAdvance();
-}
-
-function handlePlayResult(cups) {
-  const { offensePlayers, isQBSneak } = gameState.phaseData;
-  const team = gameState.offenseTeam;
-  const beginPos = gameState.ballPosition;
-  const playDetail = isQBSneak ? null : `${offensePlayers}v${offensePlayers + 1}`;
-
-  // QB Sneak: win = +1, tie/loss = 0
-  if (isQBSneak) {
-    if (cups > 0) {
-      const result = advanceBall(1);
-      if (result === 'td') {
-        setPlayResult(team, Phase.PLAY_RESULT, beginPos, team * FieldPosition.FIELD_MAX, { outcome: 'td', playDetail });
-        return;
-      }
-      setPlayResult(team, Phase.PLAY_RESULT, beginPos, gameState.ballPosition, { playDetail });
-      checkFirstDownAndAdvance();
-    } else {
-      setPlayResult(team, Phase.PLAY_RESULT, beginPos, beginPos, { playDetail });
-      gameState.down++;
-      checkDowns();
-    }
-    return;
-  }
-
-  // Regular run play
-  const isFumble = cups === -offensePlayers && offensePlayers > 1;
-
-  if (cups === 0) {
-    setPlayResult(team, Phase.PLAY_RESULT, beginPos, beginPos, { playDetail });
-    gameState.down++;
-    checkDowns();
-    return;
-  }
-
-  const yardageValue = cups > 0 ? FLIP_CUP_YARDAGE[cups] : FLIP_CUP_YARDAGE[-cups];
-
-  if (yardageValue === 'TD' && cups > 0) {
-    setPlayResult(team, Phase.PLAY_RESULT, beginPos, team * FieldPosition.FIELD_MAX, { outcome: 'td', playDetail });
-    scoreTouchdown();
-    return;
-  }
-
-  const yards = cups > 0 ? yardageValue : -yardageValue;
-  const endPos = beginPos + yards * team;
-
-  if (isFumble) {
-    gameState.ballPosition = endPos;
-    setPlayResult(team, Phase.PLAY_RESULT, beginPos, FieldPosition.clampToField(endPos), { outcome: 'turnover', turnoverReason: 'fumble', playDetail });
-    handleTurnover({ checkDefensiveScoring: true });
-    return;
-  }
-
-  const result = advanceBall(yards);
-  if (result === 'td') {
-    setPlayResult(team, Phase.PLAY_RESULT, beginPos, team * FieldPosition.FIELD_MAX, { outcome: 'td', playDetail });
-    return;
-  }
-  if (result === 'safety') {
-    setPlayResult(team, Phase.PLAY_RESULT, beginPos, -team * FieldPosition.FIELD_MAX, { outcome: 'safety', playDetail });
-    return;
-  }
-  setPlayResult(team, Phase.PLAY_RESULT, beginPos, gameState.ballPosition, { playDetail });
-  checkFirstDownAndAdvance();
-}
-
-// Check first down and advance to next down (or reset if first down made)
-function checkFirstDownAndAdvance() {
-  const team = gameState.offenseTeam;
-  const madeFirstDown = gameState.ballPosition * team >= gameState.firstDownMarker * team;
-  if (madeFirstDown) {
-    gameState.down = 1;
-    setFirstDownMarker();
-  } else {
-    gameState.down++;
-  }
-  checkDowns();
-}
-
-function checkDowns() {
-  if (gameState.down > 4) {
-    // Turnover on downs
-    if (flipPossession(true)) return; // Quarter transition handled (e.g., Q3 kickoff)
-    startNewPossession();
-  } else {
-    // All plays available on all downs
-    enterPhase(Phase.NORMAL_PLAY);
-  }
-}
-
-function handleOffsides(dir) {
-  const team = gameState.offenseTeam;
-  const beginPos = gameState.ballPosition;
-  const newPos = beginPos + dir * team;
-  const playDetail = dir < 0 ? 'offense' : 'defense';
-
-  gameState.ballPosition = newPos;
-
-  // Check for TD (ball pushed past opponent's endzone)
-  if (FieldPosition.isTouchdown(newPos, team)) {
-    setPlayResult(team, 'offsides', beginPos, team * FieldPosition.FIELD_MAX, { playDetail, outcome: 'td' });
-    gameState.ballPosition = FieldPosition.clampToField(newPos);
-    scoreTouchdown();
-    return;
-  }
-
-  // Check for safety (ball pushed past own endzone)
-  if (FieldPosition.isSafety(newPos, team)) {
-    setPlayResult(team, 'offsides', beginPos, -team * FieldPosition.FIELD_MAX, { playDetail, outcome: 'safety' });
-    gameState.ballPosition = FieldPosition.clampToField(newPos);
-    scoreSafety();
-    return;
-  }
-
-  // Normal penalty - clamp to field
-  gameState.ballPosition = FieldPosition.clampToField(newPos);
-  setPlayResult(team, 'offsides', beginPos, gameState.ballPosition, { playDetail });
-  enterPhase(Phase.NORMAL_PLAY);
-}
-
-function handleFourthDown(choice) {
-  // Now accessible from any down via unified play selector
-  if (choice === 'punt') {
-    enterPhase(Phase.PUNT);
-  } else if (choice === 'fg') {
-    enterPhase(Phase.FIELD_GOAL_ATTEMPT);
-  }
-}
-
-function handlePuntKick(cup) {
-  handleKick(cup, Phase.PUNT, Phase.PUNT_RETURN, 'puntLanding');
-}
-
-function handlePuntMiss() {
-  handleKick(null, Phase.PUNT, Phase.PUNT_RETURN, 'puntLanding');
-}
-
-function handlePuntReturn(cup) {
-  handleReturnHit(cup, Phase.PUNT_RETURN, 'puntLanding');
-}
-
-function handlePuntReturnMiss() {
-  handleReturnMissShared(Phase.PUNT_RETURN, 'puntLanding');
-}
-
-function handleFieldGoal(result) {
-  const team = gameState.offenseTeam;
-  const pos = gameState.ballPosition;
-
-  if (result === 'make') {
-    setPlayResult(team, Phase.FIELD_GOAL_ATTEMPT, pos, pos, { outcome: 'made', points: 3 });
-    addScore(team, 3);
-    startKickoff();
-  } else {
-    setPlayResult(team, Phase.FIELD_GOAL_ATTEMPT, pos, pos, { outcome: 'missed' });
-    if (flipPossession(true)) return;
-    startNewPossession();
-  }
-}
-
-function scoreTouchdown() {
-  addScore(gameState.offenseTeam, 6);
-  // Ball in the endzone they scored in (team's scoring endzone = team * (FieldPosition.FIELD_MAX+1))
-  gameState.ballPosition = gameState.offenseTeam * (FieldPosition.FIELD_MAX + 1);
-  enterPhase(Phase.TOUCHDOWN_CONVERSION);
-}
-
-function scoreSafety() {
-  // Defense scores 2 points
-  addScore(-gameState.offenseTeam, 2);
-  startKickoff();
-}
-
-function handleConversionChoice(choice) {
-  const team = gameState.offenseTeam;
-  const pos = team * FieldPosition.YARD_5;
-  gameState.ballPosition = pos;
-  setPlayResult(team, 'conversion_choice', pos, pos, { playDetail: choice === 'xp' ? 'extra point' : '2 point' });
-  if (choice === 'xp') {
-    enterPhase(Phase.EXTRA_POINT);
-  } else {
-    enterPhase(Phase.TWO_POINT_CONVERSION, { offensePlayers: 1, isQBSneak: true });
-  }
-}
-
-function handleExtraPoint(result) {
-  const team = gameState.offenseTeam;
-  const pos = gameState.ballPosition;
-
-  if (result === 'make') {
-    setPlayResult(team, Phase.EXTRA_POINT, pos, pos, { outcome: 'made', points: 1 });
-    addScore(team, 1);
-  } else {
-    setPlayResult(team, Phase.EXTRA_POINT, pos, pos, { outcome: 'missed' });
-  }
-  startKickoff();
-}
-
-function handleTwoPoint(cups) {
-  const team = gameState.offenseTeam;
-  const pos = gameState.ballPosition;
-
-  if (cups === 1) {
-    setPlayResult(team, Phase.TWO_POINT_CONVERSION, pos, pos, { outcome: 'made', points: 2 });
-    addScore(team, 2);
-  } else {
-    setPlayResult(team, Phase.TWO_POINT_CONVERSION, pos, pos, { outcome: 'missed' });
-  }
-  startKickoff();
-}
+// ============ Game logic ============
 
 function addScore(team, points) {
   getTeam(team).score += points;
 }
 
-// Start a fresh possession at current ball position
-function startNewPossession() {
+// Reset to first down at current ball position, return transition to normal play
+function setupFreshDowns() {
   gameState.down = 1;
-  setFirstDownMarker();
-  enterPhase(Phase.NORMAL_PLAY);
-}
-
-// Set first down marker in the direction the offense is moving
-function setFirstDownMarker() {
   const team = gameState.offenseTeam;
   // Marker is CUPS_TO_FIRST_DOWN cups toward scoring endzone, capped at endzone
   const newMarker = gameState.ballPosition + CUPS_TO_FIRST_DOWN * team;
-  // Cap at endzone (FieldPosition.FIELD_MAX + 1 or FieldPosition.FIELD_MIN - 1)
   if (team > 0) {
     gameState.firstDownMarker = Math.min(FieldPosition.FIELD_MAX + 1, newMarker);
   } else {
     gameState.firstDownMarker = Math.max(FieldPosition.FIELD_MIN - 1, newMarker);
   }
+  return { nextPhase: Phase.NORMAL_PLAY };
 }
 
-function flipPossession(advancePossession = true) {
-  if (gameState.overtime) {
-    return handleOTTransition();
+function setupOvertimeDrive() {
+  const ot = gameState.overtime;
+  if (gameState.possession === 1) {
+    // First team finished - second team gets ball at midfield
+    gameState.possession = 2;
+    gameState.offenseTeam = -ot.firstOffense;
+    gameState.ballPosition = 0;
+    return setupFreshDowns();
   }
-  gameState.offenseTeam = -gameState.offenseTeam;
-  return advancePossession ? advanceGameClock() : false;
-}
-
-function startKickoff() {
-  if (gameState.overtime) {
-    handleOTTransition();
-    return;
+  // Both teams had possession - check for winner
+  if (gameState.team1.score !== gameState.team2.score) {
+    return { nextPhase: Phase.GAME_OVER };
   }
-  enterKickoffPhase();
+  // Still tied - FG shootout
+  gameState.offenseTeam = ot.firstOffense;
+  ot.fgShootout = { firstTeam: null, firstResult: null, round: 1 };
+  gameState.ballPosition = 0;
+  return { nextPhase: Phase.OVERTIME_FIELD_GOAL };
 }
 
 function advanceGameClock() {
-  if (gameState.overtime) return false;
+  if (gameState.overtime) return setupOvertimeDrive();
 
   gameState.possession++;
   if (gameState.possession > POSSESSIONS_PER_QUARTER) {
     gameState.quarter++;
 
     if (gameState.quarter > TOTAL_QUARTERS) {
-      endGameOrOvertime();
-      return true;
+      // Game over or overtime
+      if (gameState.team1.score === gameState.team2.score) {
+        gameState.overtime = { firstOffense: null, fgShootout: null };
+        return { nextPhase: Phase.OVERTIME_START };
+      }
+      return { nextPhase: Phase.GAME_OVER };
     }
     if (gameState.quarter === 3) {
       // Second half kickoff: team that received opening kickoff now KICKS
       gameState.possession = 0;  // Reset to 0, advances when kick lands
       gameState.offenseTeam = gameState.openingKickoffReceiver;
-      enterKickoffPhase(false);  // No onside at start of half
-      return true;
+      return setupKickoff(false, false);
     }
     // Q2/Q4: no kickoff, possession starts at 1
     gameState.possession = 1;
   }
-  return false;
-}
 
-// ============ Overtime ============
-
-function endGameOrOvertime() {
-  if (gameState.team1.score === gameState.team2.score) {
-    gameState.overtime = { round: 1, firstOffense: null, firstTeamDone: false, fgShootout: null };
-    enterPhase(Phase.OVERTIME_START);
-  } else {
-    enterPhase(Phase.GAME_OVER);
+  // Dispatch based on current phase
+  const returnPhase = KICK_TO_RETURN_PHASE[gameState.phase];
+  if (returnPhase) {
+    return { nextPhase: returnPhase, phaseData: gameState.phaseData };
   }
+  return setupFreshDowns();
 }
 
-function handleOTFirst(team) {
-  gameState.offenseTeam = team;
-  gameState.overtime.firstOffense = team;
-  gameState.overtime.firstTeamDone = false;
-  gameState.ballPosition = 0;
-  setPlayResult(team, 'ot_first', 0, 0);
-  startNewPossession();
-}
-
-// Handle OT possession transitions (after turnover, score, etc.)
-function handleOTTransition() {
-  const ot = gameState.overtime;
-  if (!ot.firstTeamDone) {
-    // First team just finished - give second team ball at midfield
-    ot.firstTeamDone = true;
-    gameState.offenseTeam = -ot.firstOffense;
-    gameState.ballPosition = 0;
-    startNewPossession();
-    return true;
-  } else {
-    // Both teams have had possessions - check for winner
-    if (gameState.team1.score !== gameState.team2.score) {
-      enterPhase(Phase.GAME_OVER);
-    } else {
-      // Still tied - go to FG shootout
-      gameState.offenseTeam = ot.firstOffense;
-      ot.fgShootout = { firstTeam: null, firstMade: false, firstMissed: false };
-      gameState.ballPosition = 0;  // All OT FGs from the 50
-      enterPhase(Phase.OVERTIME_FIELD_GOAL);
-    }
-    return true;
-  }
-}
-
-function handleOTFieldGoal(result) {
-  const currentTeam = gameState.offenseTeam;
-  const otherTeam = -currentTeam;
-  const pos = gameState.ballPosition;
-  const fg = gameState.overtime.fgShootout;
-
-  if (result === 'make') {
-    setPlayResult(currentTeam, Phase.OVERTIME_FIELD_GOAL, pos, pos, { outcome: 'made', points: 3 });
-    if (fg.firstMissed) {
-      // Second team wins (first missed, second made)
-      enterPhase(Phase.GAME_OVER);
-      return;
-    }
-    if (!fg.firstMade) {
-      // First team made it, other team needs to match
-      fg.firstMade = true;
-      fg.firstTeam = currentTeam;
-      gameState.offenseTeam = otherTeam;
-    } else {
-      // Both teams made it - continue from 50
-      fg.firstMade = false;
-      gameState.offenseTeam = fg.firstTeam;
-    }
-  } else {
-    // Miss
-    setPlayResult(currentTeam, Phase.OVERTIME_FIELD_GOAL, pos, pos, { outcome: 'missed' });
-    if (fg.firstMade) {
-      // First team made, second missed - first team wins
-      enterPhase(Phase.GAME_OVER);
-      return;
-    }
-    // First team missed, second team tries
-    fg.firstMissed = true;
-    fg.firstTeam = currentTeam;
-    gameState.offenseTeam = otherTeam;
-  }
-}
-
-// ============ Screen Management ============
+// ============ Screen management ============
 
 function showSetup() {
   elements.setupScreen.style.display = 'block';
@@ -2091,11 +1840,6 @@ function startNewGame() {
   clearSavedGame();
   saveGame();
   showGame();
-}
-
-function handleNewGame() {
-  clearSavedGame();
-  showSetup();
 }
 
 function resumeGame() {
