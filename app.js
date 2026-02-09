@@ -119,7 +119,7 @@ function createInitialState(team1Name, team1Color, team2Name, team2Color) {
     lastPlayResult: { team: 1, playType: 'game_start', beginPosition: 0, endPosition: 0 },
     openingKickoffReceiver: null,
     history: [],
-    overtime: null         // { round, firstOffense, firstTeamDone, fgShootout: { firstTeam, made, missed } }
+    overtime: null         // { round, firstOffense, firstTeamDone, fgShootout: { firstTeam, firstMade, firstMissed } }
   };
 }
 
@@ -557,10 +557,10 @@ function formatLastPlayResult(result) {
       return `${teamName} onside: ${result.outcome === 'recovery' ? 'Recovered' : 'Failed'}`;
 
     case Phase.FIELD_GOAL_ATTEMPT:
-    case Phase.OVERTIME_FIELD_GOAL: {
-      const name = result.playType === Phase.OVERTIME_FIELD_GOAL ? 'OT field goal' : 'field goal';
-      return `${teamName} ${name}: ${result.outcome === 'made' ? `Good! (${result.points} pts)` : 'No good'}`;
-    }
+      return `${teamName} field goal: ${result.outcome === 'made' ? `Good! (${result.points} pts)` : 'No good'}`;
+
+    case Phase.OVERTIME_FIELD_GOAL:
+      return `${teamName} OT field goal: ${result.outcome === 'made' ? 'Good!' : 'No good'}`;
 
     case Phase.EXTRA_POINT:
       return `${teamName} extra point: ${result.outcome === 'made' ? 'Good!' : 'No good'}`;
@@ -705,7 +705,8 @@ function renderDownDistance() {
 // Phase groupings for field rendering
 const RETURN_PHASES = [Phase.KICKOFF_RETURN, Phase.PUNT_RETURN];
 const THROWING_PHASES = [Phase.THROW_PLAY, Phase.KICKOFF_KICK, Phase.ONSIDE_KICK, Phase.KICKOFF_RETURN,
-                         Phase.PUNT, Phase.PUNT_RETURN, Phase.FIELD_GOAL_ATTEMPT, Phase.EXTRA_POINT];
+                         Phase.PUNT, Phase.PUNT_RETURN, Phase.FIELD_GOAL_ATTEMPT, Phase.EXTRA_POINT,
+                         Phase.OVERTIME_FIELD_GOAL];
 const PLAY_PHASES = [Phase.NORMAL_PLAY, Phase.PLAY_RESULT, Phase.THROW_PLAY, Phase.FIELD_GOAL_ATTEMPT, Phase.PUNT];
 
 // Calculate ball display position based on current phase
@@ -815,7 +816,7 @@ function getCupEffect(cupIndex, phase) {
   const effect = { className: '', text: '' };
   const team = gameState.offenseTeam;
 
-  if (phase === Phase.FIELD_GOAL_ATTEMPT) {
+  if (phase === Phase.FIELD_GOAL_ATTEMPT || phase === Phase.OVERTIME_FIELD_GOAL) {
     // Valid FG: cup at ball position or behind it (toward kicker's home)
     const ballPos = gameState.ballPosition;
     const isValidFG = cupIndex * team <= ballPos * team;
@@ -887,7 +888,7 @@ function renderEffectRow(offenseGoesRight) {
 
   if (THROWING_PHASES.includes(gameState.phase)) {
     // FG/XP kick toward own goal (backward), all others go in offense direction
-    const isFieldGoalKick = [Phase.FIELD_GOAL_ATTEMPT, Phase.EXTRA_POINT].includes(gameState.phase);
+    const isFieldGoalKick = [Phase.FIELD_GOAL_ATTEMPT, Phase.EXTRA_POINT, Phase.OVERTIME_FIELD_GOAL].includes(gameState.phase);
     const throwerGoesRight = isFieldGoalKick ? !offenseGoesRight : offenseGoesRight;
     const throwArrow = document.createElement('span');
     throwArrow.className = `direction-arrow ${throwerGoesRight ? 'left' : 'right'}`;
@@ -1338,15 +1339,12 @@ const controlRenderers = {
   ),
 
   [Phase.GAME_OVER]: () => {
-    const winner = gameState.team1.score > gameState.team2.score ? gameState.team1 :
-                   gameState.team2.score > gameState.team1.score ? gameState.team2 : null;
+    const winner = gameState.team1.score > gameState.team2.score ? gameState.team1 : gameState.team2;
     const winnerTeam = gameState.team1.score > gameState.team2.score ? 1 : -1;
-    if (!winner) {
-      return controlSection('Game tied!', null, Button.primary('Start overtime', 'start-overtime'));
-    }
     return controlSection(
       `${winner.name} wins! (${gameState.team1.score} - ${gameState.team2.score})`,
-      winnerTeam
+      winnerTeam,
+      Button.neutral('New game', 'new-game')
     );
   },
 
@@ -1401,9 +1399,9 @@ const actionHandlers = {
   'conversion-choice': e => handleConversionChoice(e.target.dataset.choice),
   'extra-point': e => handleExtraPoint(e.target.dataset.result),
   'two-point': e => handleTwoPoint(parseInt(e.target.dataset.cups)),
-  'start-overtime': handleStartOvertime,
   'ot-first': e => handleOTFirst(parseInt(e.target.dataset.team)),
-  'ot-fg': e => handleOTFieldGoal(e.target.dataset.result)
+  'ot-fg': e => handleOTFieldGoal(e.target.dataset.result),
+  'new-game': handleNewGame
 };
 
 function handleAction(e) {
@@ -1450,7 +1448,7 @@ function handleRegularKickoff() {
 function handleSkipKickoff() {
   // Skip kickoff - advance to next quarter or end game
   if (gameState.quarter >= TOTAL_QUARTERS) {
-    enterPhase(Phase.GAME_OVER);
+    endGameOrOvertime();
   } else {
     gameState.quarter++;
     if (gameState.quarter === 3) {
@@ -1893,7 +1891,7 @@ function advanceGameClock() {
     gameState.quarter++;
 
     if (gameState.quarter > TOTAL_QUARTERS) {
-      enterPhase(Phase.GAME_OVER);
+      endGameOrOvertime();
       return true;
     }
     if (gameState.quarter === 3) {
@@ -1911,9 +1909,13 @@ function advanceGameClock() {
 
 // ============ Overtime ============
 
-function handleStartOvertime() {
-  gameState.overtime = { round: 1, firstOffense: null, firstTeamDone: false, fgShootout: null };
-  enterPhase(Phase.OVERTIME_START);
+function endGameOrOvertime() {
+  if (gameState.team1.score === gameState.team2.score) {
+    gameState.overtime = { round: 1, firstOffense: null, firstTeamDone: false, fgShootout: null };
+    enterPhase(Phase.OVERTIME_START);
+  } else {
+    enterPhase(Phase.GAME_OVER);
+  }
 }
 
 function handleOTFirst(team) {
@@ -1941,9 +1943,9 @@ function handleOTTransition() {
       enterPhase(Phase.GAME_OVER);
     } else {
       // Still tied - go to FG shootout
-      gameState.ballPosition = 0;
       gameState.offenseTeam = ot.firstOffense;
       ot.fgShootout = { firstTeam: null, firstMade: false, firstMissed: false };
+      gameState.ballPosition = 0;  // All OT FGs from the 50
       enterPhase(Phase.OVERTIME_FIELD_GOAL);
     }
     return true;
@@ -1969,20 +1971,19 @@ function handleOTFieldGoal(result) {
       fg.firstTeam = currentTeam;
       gameState.offenseTeam = otherTeam;
     } else {
-      // Both teams made it - move back and continue
-      gameState.ballPosition--;
+      // Both teams made it - continue from 50
       fg.firstMade = false;
       gameState.offenseTeam = fg.firstTeam;
     }
   } else {
-    // Both attempts missed
+    // Miss
     setPlayResult(currentTeam, Phase.OVERTIME_FIELD_GOAL, pos, pos, { outcome: 'missed' });
     if (fg.firstMade) {
-      // First team made, second missed both - first team wins
+      // First team made, second missed - first team wins
       enterPhase(Phase.GAME_OVER);
       return;
     }
-    // First team missed both, second team tries
+    // First team missed, second team tries
     fg.firstMissed = true;
     fg.firstTeam = currentTeam;
     gameState.offenseTeam = otherTeam;
@@ -2014,6 +2015,11 @@ function startNewGame() {
   clearSavedGame();
   saveGame();
   showGame();
+}
+
+function handleNewGame() {
+  clearSavedGame();
+  showSetup();
 }
 
 function resumeGame() {
