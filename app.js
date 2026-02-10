@@ -579,7 +579,8 @@ function computeThrowResultTransition(result) {
     return resolvePlay(-SACK_FUMBLE_YARDS, DownMode.TURNOVER, { turnoverReason: 'fumble' });
   }
   if (result === 'incomplete') {
-    return { nextPhase: Phase.INCOMPLETE_DEFENSE_SHOT, phaseData: { incompleteFrom: gameState.ballPosition } };
+    setPlayResult(gameState.offenseTeam, Phase.THROW_PLAY, gameState.ballPosition, gameState.ballPosition, { outcome: 'incomplete' });
+    return { nextPhase: Phase.INCOMPLETE_DEFENSE_SHOT };
   }
 
   const yards = parseInt(result, 10);
@@ -1050,6 +1051,17 @@ function formatLastPlayResult(result) {
         ? (displayYards > 0 ? `+${displayYards}` : String(displayYards)) + (Math.abs(displayYards) === 1 ? ' yard' : ' yards')
         : 'No gain';
       return `${teamName} return: ${displayStr}`;
+    }
+
+    case Phase.INCOMPLETE_DEFENSE_SHOT: {
+      // result.team = offense for normal/fumble, defense for defensive TD
+      if (result.outcome === 'td' && result.turnoverReason === 'fumble') {
+        return `${teamName} fumble recovery: Touchdown!`;
+      }
+      if (result.turnoverReason === 'fumble') {
+        return `${teamName} pass: Incomplete, sack fumble (${yardsStr})`;
+      }
+      return `${teamName} pass: Incomplete (${yardsStr || '0 yards'})`;
     }
 
     case Phase.ONSIDE_KICK:
