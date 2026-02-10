@@ -74,7 +74,7 @@ On any down, the offense can choose from:
 | Field goal | 3 |
 | Safety | 2 |
 
-**Touchdown:** If the ball moves past the opponent's 5 yard line during a drive, it's a touchdown. The defense drinks a penalty (agree on intensity before the game). After scoring, the offense chooses to attempt an extra point or two-point conversion, then kicks off.
+**Touchdown:** If the ball moves past the opponent's 5 yard line during a drive, it's a touchdown. After scoring, the offense chooses to attempt an extra point or two-point conversion, then kicks off.
 
 **Field goal:** The offense can attempt a field goal on any down. Success awards 3 points and a kickoff follows. Failure is a turnover at the current spot. See [Field goals](#field-goals) for detailed mechanics.
 
@@ -89,6 +89,8 @@ If the score is tied after 4 quarters, each team gets 1 possession starting at t
 ## Play mechanics
 
 All throws are made from behind your own goal line, except field goals and extra points which are thrown from behind the opponent's goal line.
+
+**Player rotation:** Within a single play, each throw or flip cup must be performed by a different player. For example, if a kicker uses 2 attempts, two different players throw. On a 3v4 run, each of the 3 offensive cups is flipped by a different player. Teams should rotate players throughout the game to ensure everyone participates.
 
 ### Kicks & returns
 
@@ -144,7 +146,7 @@ Running plays are relay-style flip cup races. The offense chooses how many playe
 
 **The hike:** The first offensive player "hikes" the ball — as soon as they lift their cup off the table, the play is live.
 
-**Offsides:** Any cup lifted before it should be (before the hike, or before the previous teammate has finished) is offsides — 1-cup penalty against that team and the down is repeated. Offsides cannot cause a safety or touchdown; if it occurs at the 5 yard line, the ball stays at the 5.
+**Offsides:** Any cup lifted before it should be (before the hike, or before the previous teammate has finished) is offsides — 1-cup penalty against that team and the down is repeated. If the penalty moves the ball into the endzone, it results in a touchdown or safety accordingly.
 
 **Sneak (1v1):** A low-risk play.
 
@@ -199,7 +201,7 @@ The offense gets up to 3 throws from their end zone. The first meaningful result
 | Opponent's 25 | **Unforced interception** — defense takes over at current spot |
 | Opponent's 20 | Incomplete (ends throws) |
 
-**Defensive interception shot:** If the offense hits a cup on the 2nd or 3rd throw, the defense gets one chance to intercept by hitting the exact same cup. If successful, it's an interception. No interception shot is allowed in response to cups made on the 1st throw.
+**Defensive interception shot:** If the offense hits a cup on their 3rd throw, the defense gets one chance to intercept by hitting the exact same cup. If successful, it's an interception. No interception shot is allowed on the 1st or 2nd throw.
 
 **Defensive incomplete response:** When a pass is incomplete, the defense gets one chance to punish the offense. The defense throws from their endzone:
 
@@ -235,7 +237,7 @@ Field goals are the only play thrown from behind the opponent's goal line. The k
 - **Make:** 3 points, kickoff follows
 - **Miss all 3:** Turnover at the current line of scrimmage
 
-**Blocking rule:** If the kicker makes it on the first attempt, no block is allowed. If made on the second or third attempt, the defense gets one chance to hit the same cup. If they hit it, the kick is blocked — no points, turnover at the current spot.
+**Blocking rule:** If the kicker makes it on the first or second attempt, no block is allowed. If made on the third attempt, the defense gets one chance to hit the same cup. If they hit it, the kick is blocked — no points, turnover at the current spot.
 
 ### Touchdown conversions
 
@@ -244,6 +246,19 @@ After a touchdown, the scoring team chooses:
 **Extra point (1 point):** A field goal attempt from the 5 yard line. Standard field goal rules apply, including the blocking rule.
 
 **Two-point conversion (2 points):** A 1v1 flip cup (sneak rules). Win = 2 points. Tie or lose = 0 points. Offsides by offense = no good; offsides by defense = automatic 2 points.
+
+## Drinking rules
+
+| Event | Who drinks | Amount |
+|---|---|---|
+| First down | Defense | 1 drink |
+| Turnover (fumble, interception, on downs) | Offense | 2 drinks |
+| Any score (TD, FG, safety, conversion) | Scored-on team | 2 drinks |
+| Shutout | Scoreless team at end of game | Finish drinks |
+
+**Flip cup:** In all flip cup plays (runs, sneaks, two-point conversions), players drink and flip their cups as part of the race. This is inherent to the play, not an additional penalty.
+
+**Stacking:** Drinking penalties stack. A sack fumble returned for a touchdown costs the offense 4 drinks (2 for turnover + 2 for TD scored against).
 
 ## Quick reference
 
@@ -272,7 +287,7 @@ After a touchdown, the scoring team chooses:
 | Danger zone — 25 | Unforced interception |
 | Deep zone — call 15/10/5 | +6 / +9 / TD |
 | All incomplete | Down consumed |
-| Interception shot | 2nd/3rd throw: defense can match cup |
+| Interception shot | 3rd throw only: defense can match cup |
 | Incomplete + defense shot | 1 throw: +1 to fumble based on cup |
 
 | Kicks & returns | Result |
