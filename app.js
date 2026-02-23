@@ -1,6 +1,6 @@
-// Gridiron beerball
+// Gridiron cupball
 
-const STORAGE_KEY = 'gridiron-beerball-game';
+const STORAGE_KEY = 'gridiron-cupball-game';
 const STORAGE_VERSION = 3;  // Increment when state structure changes
 const CUPS_TO_FIRST_DOWN = 3;
 const POSSESSIONS_PER_QUARTER = 4;

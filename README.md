@@ -1,8 +1,8 @@
-# Gridiron Beerball
+# Gridiron cupball
 
 ## Overview
 
-Gridiron Beerball is a team drinking game that simulates American football using flip cup, beer pong throwing, and a field of 19 stationary cups. Two teams compete across four quarters to score touchdowns and field goals while defending their end zone.
+Gridiron cupball is a team drinking game that simulates American football using flip cup, beer pong throwing, and a field of 19 stationary cups. Two teams compete across four quarters to score touchdowns and field goals while defending their end zone.
 
 ## Setup
 
